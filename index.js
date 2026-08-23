@@ -1,3 +1,4 @@
+burayı sil
 const {
     Client,
     GatewayIntentBits,
