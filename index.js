@@ -674,6 +674,109 @@ client.on("messageCreate", async message => {
     }
 });
 
+/* =====================================================
+   KLAN SONUÇ
+===================================================== */
+
+if (
+    command === "klan" &&
+    args[0]?.toLowerCase() === "sonuç"
+) {
+    if (!isStaff(message.member)) {
+        return message.reply(
+            "❌ Bu komut için yetkin yok."
+        );
+    }
+
+    if (!data.clanVote) {
+        return message.reply(
+            "❌ Şu anda aktif bir klan oylaması yok."
+        );
+    }
+
+    const results = {};
+
+    // Bütün klanları 0 oy ile başlat
+    for (const clan of data.clanVote.clans) {
+        results[clan] = 0;
+    }
+
+    // Oyları say
+    for (const clan of data.clanVote.votes.values()) {
+        if (results[clan] !== undefined) {
+            results[clan]++;
+        }
+    }
+
+    const totalVotes =
+        data.clanVote.votes.size;
+
+    // Çok oy alan üstte
+    const sorted =
+        Object.entries(results)
+            .sort(
+                (a, b) => b[1] - a[1]
+            );
+
+    let description = "";
+
+    for (const [clan, count] of sorted) {
+
+        const percentage =
+            totalVotes === 0
+                ? 0
+                : (
+                    (count / totalVotes) * 100
+                ).toFixed(1);
+
+        const barLength = 10;
+
+        const filled =
+            totalVotes === 0
+                ? 0
+                : Math.round(
+                    (count / totalVotes) *
+                    barLength
+                );
+
+        const bar =
+            "█".repeat(filled) +
+            "░".repeat(
+                barLength - filled
+            );
+
+        description +=
+            `### ⚔️ ${clan}\n` +
+            `${bar} **${count} oy** — %${percentage}\n\n`;
+    }
+
+    const resultEmbed =
+        new EmbedBuilder()
+            .setTitle(
+                "⚔️ Klan Oylama Sonuçları"
+            )
+            .setDescription(
+                description ||
+                "Henüz hiç oy kullanılmadı."
+            )
+            .addFields({
+                name: "👥 Toplam Oy",
+                value:
+                    `${totalVotes}`,
+                inline: true
+            })
+            .setColor(0x5865F2)
+            .setFooter({
+                text:
+                    `Sonucu görüntüleyen: ${message.author.tag}`
+            })
+            .setTimestamp();
+
+    return message.reply({
+        embeds: [resultEmbed]
+    });
+}
+
 /* =========================================================
    BUTONLAR + SELECT MENÜLER
 ========================================================= */
