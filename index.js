@@ -3043,7 +3043,6 @@ client.on("interactionCreate", async interaction => {
           components: []
         });
       }
-    }
   } catch (err) {
     console.error(
       "Panel seçim hatası:",
