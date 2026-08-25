@@ -3580,7 +3580,7 @@ async function finishGiveaway(id) {
             "❌ Yeterli katılım olmadığı için kazanan çıkmadı."
           ].join("\n")
         )
-      ]).catch(() => {});
+      .catch(() => {});
 
     delete data.giveaways[id];
     save();
