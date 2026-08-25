@@ -524,7 +524,7 @@ client.on("messageCreate", async message => {
       message.channel.id !== ratingChannelId
     ) {
       try {
-        await message.delete();
+        message.delete().catch(() => {});
       } catch {}
 
       const warning = await message.channel.send({
