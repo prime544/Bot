@@ -396,8 +396,6 @@ client.on("messageCreate", async message => {
   const guildData = getGuildData(message.guild.id);
 
   // Kodun devamı 2/10'da gelecek.
-});
-// 2/10
 
   if (command === "avatar") {
     const target =
