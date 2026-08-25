@@ -3518,7 +3518,7 @@ client.on("interactionCreate", async interaction => {
           `🧹 ${removed} boş geçici ses kanalı temizlendi.`,
         ephemeral: true
       });
-    }
+    
 
 // =========================
 // ÜYE GİRİŞİ
