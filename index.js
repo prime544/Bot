@@ -3733,3 +3733,598 @@ function getClanConfig(guildId) {
 function getClanList(guildId) {
   return data.clans?.[guildId] || [];
 }
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isStringSelectMenu()) return;
+
+  if (interaction.customId === "ticket_category_select") {
+    const config =
+      data.ticketConfig?.[interaction.guild.id];
+
+    if (!config) {
+      return interaction.reply({
+        content: "❌ Ticket sistemi kurulmamış.",
+        ephemeral: true
+      });
+    }
+
+    const existing =
+      Object.values(data.tickets || {})
+        .find(
+          ticket =>
+            ticket.guildId === interaction.guild.id &&
+            ticket.userId === interaction.user.id &&
+            ticket.closed !== true
+        );
+
+    if (existing) {
+      const oldChannel =
+        interaction.guild.channels.cache.get(
+          existing.channel
+        );
+
+      return interaction.reply({
+        content:
+          oldChannel
+            ? `❌ Zaten açık bir ticketın var: ${oldChannel}`
+            : "❌ Zaten açık bir ticketın var.",
+        ephemeral: true
+      });
+    }
+
+    const selected =
+      interaction.values[0];
+
+    const ticketCategory =
+      config.categories?.[selected];
+
+    if (!ticketCategory) {
+      return interaction.reply({
+        content:
+          "❌ Ticket kategorisi bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    const category =
+      interaction.guild.channels.cache.get(
+        ticketCategory.id || config.category
+      );
+
+    if (
+      !category ||
+      category.type !== ChannelType.GuildCategory
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Ticket kategorisi bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply({
+      ephemeral: true
+    });
+
+    const ticketId =
+      `${interaction.guild.id}-${interaction.user.id}-${Date.now()}`;
+
+    const channel =
+      await interaction.guild.channels.create({
+        name:
+          `ticket-${interaction.user.username}`
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "")
+            .slice(0, 80),
+        type:
+          ChannelType.GuildText,
+        parent:
+          category.id,
+        permissionOverwrites: [
+          {
+            id:
+              interaction.guild.roles.everyone.id,
+            deny: [
+              PermissionFlagsBits.ViewChannel
+            ]
+          },
+          {
+            id:
+              interaction.user.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.AttachFiles
+            ]
+          },
+          {
+            id:
+              config.role,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.AttachFiles
+            ]
+          }
+        ]
+      })
+      .catch(() => null);
+
+    if (!channel) {
+      return interaction.editReply({
+        content:
+          "❌ Ticket kanalı oluşturulamadı."
+      });
+    }
+
+    data.tickets[ticketId] = {
+      id: ticketId,
+      guildId:
+        interaction.guild.id,
+      channel:
+        channel.id,
+      userId:
+        interaction.user.id,
+      roleId:
+        config.role,
+      category:
+        ticketCategory.name,
+      createdAt:
+        Date.now(),
+      closed: false
+    };
+
+    save();
+
+    const closeButton =
+      new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(
+              `ticket_close:${ticketId}`
+            )
+            .setLabel("🔒 Ticket Kapat")
+            .setStyle(
+              ButtonStyle.Danger
+            )
+        );
+
+    await channel.send({
+      content:
+        `<@${interaction.user.id}> <@&${config.role}>`,
+      embeds: [
+        createEmbed(
+          `🎫 ${ticketCategory.name}`,
+          [
+            `👤 **Ticket sahibi:** ${interaction.user}`,
+            `🛡️ **Yetkili rolü:** <@&${config.role}>`,
+            "",
+            "Destek ekibimiz kısa süre içerisinde ilgilenecektir.",
+            "",
+            "Ticketı kapatmak için aşağıdaki butonu kullanabilirsin."
+          ].join("\n")
+        )
+      ],
+      components: [
+        closeButton
+      ]
+    });
+
+    return interaction.editReply({
+      content:
+        `✅ Ticket oluşturuldu: ${channel}`
+    });
+  }
+
+  if (
+    interaction.customId.startsWith(
+      "clan_vote:"
+    )
+  ) {
+    const guildId =
+      interaction.customId.split(":")[1];
+
+    if (
+      guildId !== interaction.guild.id
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Geçersiz oylama.",
+        ephemeral: true
+      });
+    }
+
+    const config =
+      data.clanConfig[guildId];
+
+    if (
+      !config ||
+      !config.active ||
+      Date.now() >= config.end
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Klan oylaması sona ermiş.",
+        ephemeral: true
+      });
+    }
+
+    data.clanVotes[guildId] ||= {};
+
+    if (
+      data.clanVotes[guildId][
+        interaction.user.id
+      ]
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Daha önce oy verdin. Oyunu değiştiremezsin.",
+        ephemeral: true
+      });
+    }
+
+    const index =
+      Number(interaction.values[0]);
+
+    const clans =
+      data.clans[guildId] || [];
+
+    const clan =
+      clans[index];
+
+    if (!clan) {
+      return interaction.reply({
+        content:
+          "❌ Klan bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    clan.votes =
+      Number(clan.votes || 0) + 1;
+
+    data.clanVotes[guildId][
+      interaction.user.id
+    ] = clan.name;
+
+    save();
+
+    return interaction.reply({
+      content:
+        `✅ **${clan.name}** klanına oyun kaydedildi. Oyunu değiştiremezsin.`,
+      ephemeral: true
+    });
+  }
+});
+
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isButton()) return;
+
+  if (
+    interaction.customId.startsWith(
+      "giveaway_join:"
+    )
+  ) {
+    const id =
+      interaction.customId.split(":")[1];
+
+    const giveaway =
+      data.giveaways[id];
+
+    if (!giveaway) {
+      return interaction.reply({
+        content:
+          "❌ Bu çekiliş artık aktif değil.",
+        ephemeral: true
+      });
+    }
+
+    if (
+      Date.now() >= giveaway.end
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Bu çekiliş sona ermiş.",
+        ephemeral: true
+      });
+    }
+
+    if (
+      giveaway.participants.includes(
+        interaction.user.id
+      )
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Zaten çekilişe katıldın.",
+        ephemeral: true
+      });
+    }
+
+    giveaway.participants.push(
+      interaction.user.id
+    );
+
+    save();
+
+    return interaction.reply({
+      content:
+        "🎉 Çekilişe başarıyla katıldın!",
+      ephemeral: true
+    });
+  }
+
+  if (
+    interaction.customId.startsWith(
+      "drop_claim:"
+    )
+  ) {
+    const id =
+      interaction.customId.split(":")[1];
+
+    const drop =
+      data.drops[id];
+
+    if (!drop) {
+      return interaction.reply({
+        content:
+          "❌ Bu drop artık aktif değil.",
+        ephemeral: true
+      });
+    }
+
+    if (drop.winner) {
+      return interaction.reply({
+        content:
+          `❌ Dropu zaten <@${drop.winner}> kazandı.`,
+        ephemeral: true
+      });
+    }
+
+    drop.winner =
+      interaction.user.id;
+
+    save();
+
+    const channel =
+      interaction.channel;
+
+    await interaction.reply({
+      content:
+        `🎉 Tebrikler ${interaction.user}! İlk bastığın için **${drop.prize}** ödülünü kazandın. Ödülünü almak için ticket açabilirsin.`
+    });
+
+    await channel.send({
+      embeds: [
+        createEmbed(
+          "🎁 DROP KAZANANI",
+          [
+            `🏆 **Kazanan:** ${interaction.user}`,
+            `🎁 **Ödül:** ${drop.prize}`,
+            "",
+            "🎫 Ödülünü almak için ticket açabilirsin."
+          ].join("\n")
+        )
+      ]
+    }).catch(() => {});
+
+    return;
+  }
+
+  if (
+    interaction.customId.startsWith(
+      "ticket_close:"
+    )
+  ) {
+    const ticketId =
+      interaction.customId.split(":")[1];
+
+    const ticket =
+      data.tickets[ticketId];
+
+    if (!ticket) {
+      return interaction.reply({
+        content:
+          "❌ Ticket kaydı bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    const config =
+      data.ticketConfig[
+        interaction.guild.id
+      ];
+
+    const isOwner =
+      interaction.user.id ===
+      ticket.userId;
+
+    const isStaff =
+      config &&
+      interaction.member.roles.cache.has(
+        config.role
+      );
+
+    if (!isOwner && !isStaff) {
+      return interaction.reply({
+        content:
+          "❌ Bu ticketı kapatma yetkin yok.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply({
+      ephemeral: true
+    });
+
+    const channel =
+      interaction.guild.channels.cache.get(
+        ticket.channel
+      );
+
+    if (!channel) {
+      delete data.tickets[ticketId];
+      save();
+
+      return interaction.editReply({
+        content:
+          "❌ Ticket kanalı zaten silinmiş."
+      });
+    }
+
+    const messages = [];
+
+    let lastId;
+
+    while (true) {
+      const options = {
+        limit: 100
+      };
+
+      if (lastId) {
+        options.before = lastId;
+      }
+
+      const fetched =
+        await channel.messages
+          .fetch(options)
+          .catch(() => null);
+
+      if (!fetched || !fetched.size)
+        break;
+
+      messages.push(
+        ...fetched.values()
+      );
+
+      lastId =
+        fetched.last().id;
+
+      if (fetched.size < 100)
+        break;
+    }
+
+    messages.reverse();
+
+    const transcript =
+      messages.map(msg => {
+        const date =
+          new Date(
+            msg.createdTimestamp
+          ).toLocaleString(
+            "tr-TR"
+          );
+
+        const attachments =
+          [...msg.attachments.values()]
+            .map(a => a.url)
+            .join(" ");
+
+        return [
+          `[${date}]`,
+          `${msg.author.tag}:`,
+          msg.content || "",
+          attachments
+        ].join(" ");
+      }).join("\n");
+
+    const buffer =
+      Buffer.from(
+        transcript ||
+          "Bu ticketta mesaj bulunamadı.",
+        "utf8"
+      );
+
+    const file = {
+      attachment:
+        buffer,
+      name:
+        `transcript-${ticketId}.txt`
+    };
+
+    const owner =
+      await interaction.guild.members
+        .fetch(ticket.userId)
+        .catch(() => null);
+
+    const staffRole =
+      config
+        ? interaction.guild.roles.cache.get(
+            config.role
+          )
+        : null;
+
+    const recipients = [];
+
+    if (owner) {
+      recipients.push(owner);
+    }
+
+    if (staffRole) {
+      for (
+        const member
+        of staffRole.members.values()
+      ) {
+        if (
+          !recipients.some(
+            x => x.id === member.id
+          )
+        ) {
+          recipients.push(member);
+        }
+      }
+    }
+
+    const closeEmbed =
+      createEmbed(
+        "🔒 TICKET KAPATILDI",
+        [
+          `🎫 **Ticket:** ${ticket.category}`,
+          `👤 **Sahip:** <@${ticket.userId}>`,
+          `🔒 **Kapatan:** ${interaction.user}`,
+          "",
+          "Transcript ektedir."
+        ].join("\n")
+      );
+
+    for (
+      const recipient
+      of recipients
+    ) {
+      await recipient.send({
+        embeds: [closeEmbed],
+        files: [file]
+      }).catch(() => {});
+    }
+
+    ticket.closed = true;
+    ticket.closedAt =
+      Date.now();
+    ticket.closedBy =
+      interaction.user.id;
+
+    save();
+
+    await interaction.editReply({
+      content:
+        "✅ Ticket kapatılıyor ve transcript gönderiliyor."
+    });
+
+    setTimeout(
+      () => {
+        channel.delete()
+          .catch(() => {});
+
+        delete data.tickets[
+          ticketId
+        ];
+
+        save();
+      },
+      2000
+    );
+
+    return;
+  }
+});
