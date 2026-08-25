@@ -395,9 +395,7 @@ client.on("messageCreate", async message => {
 
   const guildData = getGuildData(message.guild.id);
 
-  // Kodun devamı 2/10'da gelecek.
 });
-// 2/10
 
   if (command === "avatar") {
     const target =
@@ -823,7 +821,6 @@ client.on("messageCreate", async message => {
 
     return;
         }
-// 3/10
 
   if (command === "drop") {
     if (!isStaff(message.member)) {
@@ -1195,7 +1192,6 @@ client.on("messageCreate", async message => {
       ]
     });
   }
-// 4/10
 
 function createClanVotingEmbed(voteData) {
   const sorted = [...voteData.clans].sort(
@@ -1556,7 +1552,6 @@ async function sendTicketTranscript(
     );
   }
 }
-// 5/10
 
 client.on("interactionCreate", async interaction => {
   try {
@@ -2136,7 +2131,6 @@ client.on("interactionCreate", async interaction => {
     }
   }
 });
-// 6/10
 
 client.on("interactionCreate", async interaction => {
   try {
@@ -3073,7 +3067,6 @@ client.on("interactionCreate", async interaction => {
       }).catch(() => {});
     }
   }
-// 8/10
 
     // =========================
     // KULLANICI SEÇİMİ
@@ -3527,7 +3520,7 @@ client.on("interactionCreate", async interaction => {
           `🧹 ${removed} boş geçici ses kanalı temizlendi.`,
         ephemeral: true
       });
-    }// 9/10
+    }
 
 // =========================
 // ÜYE GİRİŞİ
@@ -3955,7 +3948,6 @@ client.once("ready", async () => {
     }
   }
 });
-// 10/10
 
 // =========================
 // GÜVENLİ KAPANIŞ
