@@ -3008,60 +3008,44 @@ client.on("interactionCreate", async interaction => {
       // =========================
       // OTOROL
       // =========================
-
       if (
-        interaction.customId ===
-        "setup_autorole"
-      ) {
-        if (
-          role.position >=
-          interaction.guild.members.me.roles.highest.position
-        ) {
-          return interaction.update({
-            embeds: [
-              makeEmbed(
-                "❌ Geçersiz Rol",
-                "Botun rolü seçilen rolden yukarıda olmalı."
-              )
-            ],
-            components: []
-          });
-        }
+  interaction.isStringSelectMenu() &&
+  interaction.customId === "setup_autorole"
+) {
+  const role = guild.roles.cache.get(
+    interaction.values[0]
+  );
 
-        guildData.autorole.roleId =
-          role.id;
-
-        saveData();
-
-        return interaction.update({
-          embeds: [
-            makeEmbed(
-              "🤖 OtoRol Aktif",
-              `Sunucuya yeni üye katıldığında ${role} otomatik olarak verilecek.`
-            )
-          ],
-          components: []
-        });
-      }
-    }
-  } catch (err) {
-    console.error(
-      "Panel seçim hatası:",
-      err
-    );
-
-    if (
-      interaction.isRepliable() &&
-      !interaction.replied &&
-      !interaction.deferred
-    ) {
-      await interaction.reply({
-        content:
-          "❌ İşlem sırasında bir hata oluştu.",
-        ephemeral: true
-      }).catch(() => {});
-    }
+  if (!role) {
+    return interaction.update({
+      content: "❌ Rol bulunamadı.",
+      embeds: [],
+      components: []
+    });
   }
+
+  if (
+    role.position >=
+    guild.members.me.roles.highest.position
+  ) {
+    return interaction.update({
+      content:
+        "❌ Bot bu rolü veremez. Botun rolünü bu rolün üzerine taşı.",
+      embeds: [],
+      components: []
+    });
+  }
+
+  guildData.autoRole.roleId = role.id;
+
+  saveData();
+
+  return interaction.update({
+    content: `✅ OtoRol ayarlandı: ${role}`,
+    embeds: [],
+    components: []
+  });
+      }
 
     // =========================
     // KULLANICI SEÇİMİ
