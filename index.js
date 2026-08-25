@@ -2,19 +2,20 @@ const {
   Client,
   GatewayIntentBits,
   Partials,
+  PermissionsBitField,
+  ChannelType,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ChannelType,
-  PermissionFlagsBits
+  UserSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  ChannelSelectMenuBuilder
 } = require("discord.js");
 
 const fs = require("fs");
+const path = require("path");
 
 const client = new Client({
   intents: [
@@ -22,3387 +23,721 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildInvites
+    GatewayIntentBits.GuildVoiceStates
   ],
   partials: [
     Partials.Channel,
     Partials.Message,
-    Partials.User
+    Partials.User,
+    Partials.GuildMember
   ]
 });
 
-const DATA_FILE = "./data.json";
+const PREFIX = "!";
 
-const defaultData = {
-  ticketConfig: {},
-  tickets: {},
-  ratings: {},
-  giveaways: {},
-  drops: {},
-  clans: {},
-  clanVotes: {},
-  clanConfig: {},
-  autoRole: {},
-  welcome: {},
-  suggestion: {},
-  ratingChannel: {},
-  voiceCreator: {},
-  profanity: true
+const DATA_FILE = path.join(__dirname, "lynox-data.json");
+
+let data = {
+  guilds: {}
 };
-
-let data = defaultData;
 
 if (fs.existsSync(DATA_FILE)) {
   try {
-    const saved = JSON.parse(
-      fs.readFileSync(DATA_FILE, "utf8")
-    );
-
-    data = {
-      ...defaultData,
-      ...saved
-    };
+    data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   } catch {
-    data = defaultData;
+    data = { guilds: {} };
   }
 }
 
-function save() {
-  fs.writeFileSync(
-    DATA_FILE,
-    JSON.stringify(data, null, 2)
-  );
+function saveData() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("Veri kaydedilemedi:", err);
+  }
 }
 
-function createEmbed(title, description) {
+function getGuildData(guildId) {
+  if (!data.guilds[guildId]) {
+    data.guilds[guildId] = {
+      ticket: {
+        categoryId: null,
+        staffRoleId: null,
+        panelChannelId: null
+      },
+
+      suggestion: {
+        channelId: null
+      },
+
+      welcome: {
+        channelId: null
+      },
+
+      rating: {
+        channelId: null,
+        votes: {}
+      },
+
+      autoRole: {
+        roleId: null
+      },
+
+      clans: {
+        list: [],
+        active: null
+      },
+
+      giveaways: {},
+
+      drops: {},
+
+      tempVoice: {
+        channelId: null
+      },
+
+      tickets: {}
+    };
+
+    saveData();
+  }
+
+  return data.guilds[guildId];
+}
+
+function makeEmbed(title, description) {
   return new EmbedBuilder()
+    .setColor(0x8b5cf6)
     .setTitle(title)
     .setDescription(description)
-    .setColor(0x8b5cf6)
-    .setTimestamp();
+    .setTimestamp()
+    .setFooter({
+      text: "LynoxNetwork • Modern Discord System"
+    });
+}
+
+function isStaff(member) {
+  return member.permissions.has(
+    PermissionsBitField.Flags.ManageGuild
+  );
 }
 
 function isAdmin(member) {
   return member.permissions.has(
-    PermissionFlagsBits.Administrator
+    PermissionsBitField.Flags.Administrator
   );
 }
 
-function isManager(member) {
-  return member.permissions.has(
-    PermissionFlagsBits.ManageGuild
-  );
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts = [];
+
+  if (days) parts.push(`${days}g`);
+  if (hours) parts.push(`${hours}s`);
+  if (minutes) parts.push(`${minutes}d`);
+  if (seconds || parts.length === 0) parts.push(`${seconds}sn`);
+
+  return parts.join(" ");
 }
 
-function parseTime(value) {
-  if (!value) return 0;
+function parseDuration(text) {
+  if (!text) return null;
 
-  const number = parseInt(value);
-  if (!number) return 0;
-
-  const unit = value
-    .slice(-1)
-    .toLowerCase();
-
-  if (unit === "s") return number * 1000;
-  if (unit === "m") return number * 60 * 1000;
-  if (unit === "h") return number * 60 * 60 * 1000;
-  if (unit === "d") return number * 24 * 60 * 60 * 1000;
-
-  return 0;
-}
-
-function normalizeText(text) {
-  return text
+  const match = String(text)
     .toLowerCase()
-    .replace(/[\s._\-*\/\\]+/g, "")
-    .replace(/4/g, "a")
-    .replace(/@/g, "a")
-    .replace(/1/g, "i")
-    .replace(/!/g, "i")
-    .replace(/0/g, "o")
-    .replace(/\$/g, "s");
+    .match(/^(\d+)(s|sn|m|d|h|g|w)$/);
+
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+
+  const multipliers = {
+    s: 1000,
+    sn: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    g: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000
+  };
+
+  return amount * multipliers[unit];
 }
 
-const badWords = [
-  "amk",
-  "aq",
-  "sik",
-  "siktir",
-  "orospu",
-  "piç",
-  "yarrak",
-  "anan",
-  "oç",
-  "ibne"
-];
+function getReliability(createdTimestamp) {
+  const age = Date.now() - createdTimestamp;
 
-function getRating(guildId) {
-  const ratings = data.ratings[guildId] || {};
-  const values = Object.values(ratings);
+  const twoMonths = 60 * 24 * 60 * 60 * 1000;
+  const fiveMonths = 150 * 24 * 60 * 60 * 1000;
+  const oneYear = 365 * 24 * 60 * 60 * 1000;
 
-  if (!values.length) {
-    return "0.0";
+  if (age < twoMonths) {
+    return "⚠️ Güvenilir değil";
   }
 
-  const total = values.reduce(
-    (sum, value) => sum + value,
-    0
+  if (age < fiveMonths) {
+    return "🟡 Stabil";
+  }
+
+  if (age < oneYear) {
+    return "🟢 Güvenilir";
+  }
+
+  return "💯 %100 Güvenilir";
+}
+
+function createTicketButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ticket_general")
+      .setLabel("Genel Destek")
+      .setEmoji("🎫")
+      .setStyle(ButtonStyle.Primary),
+
+    new ButtonBuilder()
+      .setCustomId("ticket_support")
+      .setLabel("Yetkili Destek")
+      .setEmoji("🛠️")
+      .setStyle(ButtonStyle.Secondary),
+
+    new ButtonBuilder()
+      .setCustomId("ticket_report")
+      .setLabel("Şikayet / Bildirim")
+      .setEmoji("🚨")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("ticket_other")
+      .setLabel("Diğer")
+      .setEmoji("📩")
+      .setStyle(ButtonStyle.Success)
   );
-
-  return (total / values.length).toFixed(1);
 }
 
-function getTicketByChannel(channelId) {
-  return Object.entries(data.tickets)
-    .find(([, ticket]) => {
-      return ticket.channel === channelId;
-    });
+function createTicketCloseButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ticket_close")
+      .setLabel("Ticket Kapat")
+      .setEmoji("🔒")
+      .setStyle(ButtonStyle.Danger)
+  );
 }
 
-function getTicketConfig(guildId) {
-  return data.ticketConfig[guildId] || null;
-}
-
-function getClanConfig(guildId) {
-  return data.clanConfig[guildId] || null;
-}
-
-function getClanList(guildId) {
-  return data.clans[guildId] || [];
-}
-
-function safeChannel(guild, channelId) {
-  return guild.channels.cache.get(channelId);
-}
-
-function safeRole(guild, roleId) {
-  return guild.roles.cache.get(roleId);
+function sanitizeChannelName(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9-_ğüşöçıİĞÜŞÖÇ]/gi, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
 }
 
 function sleep(ms) {
-  return new Promise(resolve =>
-    setTimeout(resolve, ms)
-  );
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 client.once("ready", () => {
-  console.log(
-    `✅ ${client.user.tag} aktif!`
-  );
-});
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(`🤖 Bot aktif: ${client.user.tag}`);
+  console.log(`🌐 LynoxNetwork sistemleri hazır`);
+  console.log(`📡 ${client.guilds.cache.size} sunucuda aktif`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-client.on("error", error => {
-  console.error(
-    "Discord Client Error:",
-    error
-  );
-});
-
-process.on("unhandledRejection", error => {
-  console.error(
-    "Unhandled Rejection:",
-    error
-  );
-});
-
-process.on("uncaughtException", error => {
-  console.error(
-    "Uncaught Exception:",
-    error
-  );
+  client.user.setPresence({
+    activities: [
+      {
+        name: "LynoxNetwork • !panel",
+        type: 3
+      }
+    ],
+    status: "online"
+  });
 });
 
 client.on("guildMemberAdd", async member => {
-  const guildId = member.guild.id;
+  const guildData = getGuildData(member.guild.id);
 
-  const roleId = data.autoRole[guildId];
+  if (guildData.autoRole.roleId) {
+    try {
+      const role = member.guild.roles.cache.get(
+        guildData.autoRole.roleId
+      );
 
-  if (roleId) {
-    const role = safeRole(
-      member.guild,
-      roleId
-    );
-
-    if (role) {
-      await member.roles
-        .add(role)
-        .catch(() => {});
+      if (
+        role &&
+        role.position < member.guild.members.me.roles.highest.position
+      ) {
+        await member.roles.add(role);
+      }
+    } catch (err) {
+      console.error("OtoRol hatası:", err);
     }
   }
 
-  const welcomeChannelId =
-    data.welcome[guildId];
+  if (guildData.welcome.channelId) {
+    try {
+      const channel = member.guild.channels.cache.get(
+        guildData.welcome.channelId
+      );
 
-  if (!welcomeChannelId) return;
+      if (channel) {
+        const embed = new EmbedBuilder()
+          .setColor(0x8b5cf6)
+          .setAuthor({
+            name: "LynoxNetwork • Hoş Geldin!"
+          })
+          .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
+          .setDescription(
+            `🎉 **Hoş geldin ${member}!**\n\n` +
+            `Sunucumuza katıldığın için teşekkürler.`
+          )
+          .addFields(
+            {
+              name: "👤 Üye",
+              value: `${member.user.tag}\n<@${member.id}>`,
+              inline: true
+            },
+            {
+              name: "📅 Giriş Tarihi",
+              value: `<t:${Math.floor(Date.now() / 1000)}:F>`,
+              inline: true
+            },
+            {
+              name: "🗓️ Hesap Tarihi",
+              value: `<t:${Math.floor(
+                member.user.createdTimestamp / 1000
+              )}:F>`,
+              inline: false
+            },
+            {
+              name: "🛡️ Güvenilirlik",
+              value: getReliability(
+                member.user.createdTimestamp
+              ),
+              inline: true
+            },
+            {
+              name: "👥 Sunucu Üyesi",
+              value: `${member.guild.memberCount}`,
+              inline: true
+            }
+          )
+          .setTimestamp()
+          .setFooter({
+            text: "LynoxNetwork • Güvenli ve modern topluluk"
+          });
 
-  const channel = safeChannel(
-    member.guild,
-    welcomeChannelId
-  );
-
-  if (!channel) return;
-
-  const accountAge =
-    Date.now() -
-    member.user.createdTimestamp;
-
-  const month =
-    accountAge / 2592000000;
-
-  let reliability;
-
-  if (month < 2) {
-    reliability = "Güvenilir Değil";
-  } else if (month < 5) {
-    reliability = "Stabil";
-  } else if (month < 12) {
-    reliability = "Güvenilir";
-  } else {
-    reliability = "%100 Güvenilir";
+        await channel.send({
+          content: `${member}`,
+          embeds: [embed]
+        });
+      }
+    } catch (err) {
+      console.error("Hoş geldin sistemi hatası:", err);
+    }
   }
-
-  const accountDate =
-    Math.floor(
-      member.user.createdTimestamp / 1000
-    );
-
-  const joinDate =
-    Math.floor(Date.now() / 1000);
-
-  await channel.send({
-    embeds: [
-      createEmbed(
-        "🤩 Hoş Geldin!",
-        [
-          `**Üye:** ${member}`,
-          `**Giriş tarihi:** <t:${joinDate}:F>`,
-          `**Hesap tarihi:** <t:${accountDate}:F>`,
-          `**Güvenilirlik:** ${reliability}`
-        ].join("\n")
-      )
-    ]
-  }).catch(() => {});
 });
 
 client.on("guildMemberRemove", async member => {
-  const guildId = member.guild.id;
+  const guildData = getGuildData(member.guild.id);
 
-  const welcomeChannelId =
-    data.welcome[guildId];
+  if (!guildData.welcome.channelId) return;
 
-  if (!welcomeChannelId) return;
+  try {
+    const channel = member.guild.channels.cache.get(
+      guildData.welcome.channelId
+    );
 
-  const channel = safeChannel(
-    member.guild,
-    welcomeChannelId
-  );
+    if (!channel) return;
 
-  if (!channel) return;
-
-  await channel.send({
-    embeds: [
-      createEmbed(
-        "👋 Üye Ayrıldı",
-        `**Üye:** ${member.user.tag}\n` +
-        `Sunucudan ayrıldı.`
+    const embed = new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle("👋 Üye Ayrıldı")
+      .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
+      .setDescription(
+        `**${member.user.tag}** sunucudan ayrıldı.`
       )
-    ]
-  }).catch(() => {});
+      .addFields({
+        name: "👥 Güncel Üye Sayısı",
+        value: `${member.guild.memberCount}`,
+        inline: true
+      })
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork"
+      });
+
+    await channel.send({
+      embeds: [embed]
+    });
+  } catch (err) {
+    console.error("Çıkış sistemi hatası:", err);
+  }
 });
 
 client.on("messageCreate", async message => {
-  if (
-    message.author.bot ||
-    !message.guild
-  ) return;
+  if (message.author.bot) return;
+  if (!message.guild) return;
 
-  const guildId =
-    message.guild.id;
+  const content = message.content.trim();
 
-  if (data.profanity) {
-    const normalized =
-      normalizeText(message.content);
+  if (!content.startsWith(PREFIX)) return;
 
-    const found = badWords.some(
-      word => normalized.includes(word)
-    );
+  const args = content.slice(PREFIX.length).trim().split(/\s+/);
+  const command = (args.shift() || "").toLowerCase();
 
-    if (found) {
-      await message.delete()
-        .catch(() => {});
+  const guildData = getGuildData(message.guild.id);
 
-      const warning =
-        await message.channel.send({
-          embeds: [
-            createEmbed(
-              "⚠️ Küfür Koruması",
-              `${message.author}, küfür kullanmak yasaktır.`
-            )
-          ]
-        })
-        .catch(() => null);
-
-      if (warning) {
-        setTimeout(() => {
-          warning.delete()
-            .catch(() => {});
-        }, 3000);
-      }
-
-      return;
-    }
-  }
-
-  if (!message.content.startsWith("!")) {
-    const ratingChannel =
-      data.ratingChannel[guildId];
-
-    if (
-      ratingChannel &&
-      message.channel.id === ratingChannel
-    ) {
-      await message.delete()
-        .catch(() => {});
-
-      const warning =
-        await message.channel.send({
-          embeds: [
-            createEmbed(
-              "⭐ Puan Kanalı",
-              "Bu kanal sadece puan vermek içindir.\n" +
-              "`!puanver <1-5>` kullanabilirsiniz."
-            )
-          ]
-        })
-        .catch(() => null);
-
-      if (warning) {
-        setTimeout(() => {
-          warning.delete()
-            .catch(() => {});
-        }, 3000);
-      }
-    }
-
-    return;
-  }
-
-  const args =
-    message.content
-      .slice(1)
-      .trim()
-      .split(/\s+/);
-
-  const command =
-    args.shift()?.toLowerCase();
-
-  if (!command) return;
+  // Kodun devamı 2/10'da gelecek.
+});
+// 2/10
 
   if (command === "avatar") {
-    const user =
-      message.mentions.users.first() ||
-      message.author;
+    const target =
+      message.mentions.users.first() || message.author;
 
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(
-            `🖼️ ${user.username}`
-          )
-          .setImage(
-            user.displayAvatarURL({
-              size: 4096
-            })
-          )
-          .setColor(0x8b5cf6)
-      ]
+    const avatar = target.displayAvatarURL({
+      extension: "png",
+      size: 1024
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🖼️ Avatar")
+      .setDescription(`**${target.tag}** kullanıcısının avatarı`)
+      .setImage(avatar)
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork"
+      });
+
+    return message.reply({
+      embeds: [embed]
+    });
+  }
+
+  if (command === "ip") {
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🌐 LynoxNetwork Sunucu Bilgileri")
+      .setDescription(
+        "LynoxNetwork'e bağlanmak için aşağıdaki bilgileri kullanabilirsin."
+      )
+      .addFields(
+        {
+          name: "☕ Java",
+          value:
+            "**Sürüm:** `1.21.x`\n" +
+            "**IP:** `play.lynoxnetwork.com.tr`"
+        },
+        {
+          name: "📱 Bedrock",
+          value:
+            "**Sürüm:** Yakında\n" +
+            "**IP:** `play.lynoxnetwork.com.tr`"
+        }
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Java & Bedrock"
+      });
+
+    return message.reply({
+      embeds: [embed]
     });
   }
 
   if (command === "serverinfo") {
-    const rating =
-      getRating(guildId);
+    const owner = await message.guild.fetchOwner();
 
-    return message.channel.send({
-      embeds: [
-        createEmbed(
-          "🌐 Sunucu Bilgileri",
-          [
-            `**Sunucu Sahibi:** <@${message.guild.ownerId}>`,
-            `**Üye Sayısı:** ${message.guild.memberCount}`,
-            `**Kurulma zamanı:** <t:${Math.floor(message.guild.createdTimestamp / 1000)}:F>`,
-            `**Sunucu puanı:** ⭐ ${rating}/5`
-          ].join("\n")
-        )
-      ]
+    const guildData = getGuildData(message.guild.id);
+
+    const votes = Object.values(
+      guildData.rating.votes || {}
+    );
+
+    const totalVotes = votes.length;
+
+    const average =
+      totalVotes > 0
+        ? (
+            votes.reduce((sum, value) => sum + Number(value), 0) /
+            totalVotes
+          ).toFixed(1)
+        : "Henüz puan verilmedi";
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle(`🌐 ${message.guild.name}`)
+      .setThumbnail(
+        message.guild.iconURL({
+          size: 512
+        })
+      )
+      .addFields(
+        {
+          name: "👑 Sunucu Sahibi",
+          value: `${owner.user}`,
+          inline: true
+        },
+        {
+          name: "👥 Üye Sayısı",
+          value: `${message.guild.memberCount}`,
+          inline: true
+        },
+        {
+          name: "📅 Kurulma Zamanı",
+          value: `<t:${Math.floor(
+            message.guild.createdTimestamp / 1000
+          )}:F>`,
+          inline: false
+        },
+        {
+          name: "⭐ Sunucu Puanı",
+          value:
+            totalVotes > 0
+              ? `**${average}/5** (${totalVotes} oy)`
+              : "⭐ Henüz puan verilmedi",
+          inline: true
+        }
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Sunucu Bilgileri"
+      });
+
+    return message.reply({
+      embeds: [embed]
     });
   }
 
   if (command === "puanver") {
-    const rating =
-      Number(args[0]);
+    const ratingChannelId = guildData.rating.channelId;
 
     if (
-      ![1, 2, 3, 4, 5]
-        .includes(rating)
+      ratingChannelId &&
+      message.channel.id !== ratingChannelId
     ) {
-      return message.reply(
-        "❌ Puan 1 ile 5 arasında olmalıdır."
-      );
-    }
+      try {
+        await message.delete();
+      } catch {}
 
-    const ratingChannel =
-      data.ratingChannel[guildId];
-
-    if (
-      ratingChannel &&
-      message.channel.id !== ratingChannel
-    ) {
-      return message.reply(
-        "❌ Puan verme komutunu sadece puan verme kanalında kullanabilirsin."
-      );
-    }
-
-    data.ratings[guildId] ||= {};
-
-    data.ratings[guildId][
-      message.author.id
-    ] = rating;
-
-    save();
-
-    const result =
-      await message.channel.send({
-        embeds: [
-          createEmbed(
-            "⭐ Puan Kaydedildi",
-            `${message.author} sunucuya **${rating}/5** puan verdi.`
-          )
-        ]
+      const warning = await message.channel.send({
+        content: `${message.author} ⚠️ Puan vermek için <#${ratingChannelId}> kanalını kullanmalısın.`
       });
 
-    setTimeout(() => {
-      result.delete()
-        .catch(() => {});
-    }, 3000);
-
-    return;
-                                            }
-    if (command === "çekiliş") {
-    if (!isAdmin(message.member)) {
-      return message.reply(
-        "❌ Bu komutu kullanmak için Yönetici yetkisine sahip olmalısın."
-      );
-    }
-
-    const duration = parseTime(args[0]);
-    const winnerCount = Number(args[1]);
-    const prize = args.slice(2).join(" ");
-
-    if (!duration || !winnerCount || !prize) {
-      return message.reply(
-        "❌ Kullanım: `!çekiliş <süre> <kazanan sayısı> <ödül>`"
-      );
-    }
-
-    if (winnerCount < 1) {
-      return message.reply(
-        "❌ Kazanan sayısı en az 1 olmalıdır."
-      );
-    }
-
-    const id = `${guildId}-${Date.now()}`;
-
-    data.giveaways[id] = {
-      guildId,
-      channelId: message.channel.id,
-      messageId: null,
-      prize,
-      winnerCount,
-      participants: [],
-      end: Date.now() + duration
-    };
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`giveaway_join:${id}`)
-        .setLabel("🎉 Katıl")
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    const giveawayMessage =
-      await message.channel.send({
-        embeds: [
-          createEmbed(
-            "🎉 ÇEKİLİŞ",
-            [
-              `🎁 **Ödül:** ${prize}`,
-              `🏆 **Kazanan sayısı:** ${winnerCount}`,
-              `⏰ **Bitiş:** <t:${Math.floor(
-                (Date.now() + duration) / 1000
-              )}:R>`,
-              "",
-              "Çekilişe katılmak için aşağıdaki butona bas!"
-            ].join("\n")
-          )
-        ],
-        components: [row]
-      });
-
-    data.giveaways[id].messageId =
-      giveawayMessage.id;
-
-    save();
-
-    setTimeout(
-      () => finishGiveaway(id),
-      duration
-    );
-
-    return;
-  }
-
-  if (command === "drop") {
-    if (!isAdmin(message.member)) {
-      return message.reply(
-        "❌ Bu komutu kullanmak için Yönetici yetkisine sahip olmalısın."
-      );
-    }
-
-    const prize = args.join(" ");
-
-    if (!prize) {
-      return message.reply(
-        "❌ Kullanım: `!drop <ödül>`"
-      );
-    }
-
-    const id = `${guildId}-${Date.now()}`;
-
-    data.drops[id] = {
-      guildId,
-      channelId: message.channel.id,
-      messageId: null,
-      prize,
-      winner: null
-    };
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`drop_claim:${id}`)
-        .setLabel("🎁 DROP'U KAP")
-        .setStyle(ButtonStyle.Success)
-    );
-
-    const dropMessage =
-      await message.channel.send({
-        embeds: [
-          createEmbed(
-            "🎁 DROP",
-            [
-              `🎁 **Ödül:** ${prize}`,
-              "",
-              "⚡ Butona ilk basan kişi kazanır!"
-            ].join("\n")
-          )
-        ],
-        components: [row]
-      });
-
-    data.drops[id].messageId =
-      dropMessage.id;
-
-    save();
-
-    return;
-  }
-
-  if (command === "klan") {
-    const sub =
-      args.shift()?.toLowerCase();
-
-    if (sub === "add") {
-      if (!isAdmin(message.member)) {
-        return message.reply(
-          "❌ Sadece Yönetici kullanabilir."
-        );
-      }
-
-      const config =
-        getClanConfig(guildId);
-
-      if (!config?.active) {
-        return message.reply(
-          "❌ Klan oylama sistemi aktif değil."
-        );
-      }
-
-      const name =
-        args.join(" ").trim();
-
-      if (!name) {
-        return message.reply(
-          "❌ Klan adı yazmalısın."
-        );
-      }
-
-      data.clans[guildId] ||= [];
-
-      const exists =
-        data.clans[guildId]
-          .some(
-            clan =>
-              clan.name.toLowerCase() ===
-              name.toLowerCase()
-          );
-
-      if (exists) {
-        return message.reply(
-          "❌ Bu klan zaten eklenmiş."
-        );
-      }
-
-      data.clans[guildId].push({
-        name,
-        votes: 0
-      });
-
-      save();
-
-      return message.channel.send({
-        embeds: [
-          createEmbed(
-            "🏆 Klan Eklendi",
-            `**${name}** klanı oylama sistemine eklendi.`
-          )
-        ]
-      });
-    }
-
-    if (sub === "oyla") {
-      const duration =
-        args[0];
-
-      if (!duration) {
-        return message.reply(
-          "❌ Kullanım: `!klan oyla 1h`"
-        );
-      }
-
-      const config =
-        getClanConfig(guildId);
-
-      if (!config?.active) {
-        return message.reply(
-          "❌ Klan oylama sistemi aktif değil."
-        );
-      }
-
-      if (Date.now() >= config.end) {
-        return message.reply(
-          "❌ Klan oylaması sona ermiş."
-        );
-      }
-
-      const clans =
-        getClanList(guildId);
-
-      if (!clans.length) {
-        return message.reply(
-          "❌ Henüz klan eklenmemiş."
-        );
-      }
-
-      data.clanVotes[guildId] ||= {};
-
-      if (
-        data.clanVotes[guildId]
-          [message.author.id]
-      ) {
-        return message.reply(
-          "❌ Daha önce oy verdin ve oyun değiştirilemez."
-        );
-      }
-
-      const options =
-        clans.map((clan, index) => ({
-          label: clan.name.slice(0, 100),
-          value: String(index),
-          description:
-            `${clan.votes || 0} oy`
-        }));
-
-      const menu =
-        new StringSelectMenuBuilder()
-          .setCustomId(
-            `clan_vote:${guildId}`
-          )
-          .setPlaceholder(
-            "🏆 Bir klan seç"
-          )
-          .addOptions(options);
-
-      return message.channel.send({
-        embeds: [
-          createEmbed(
-            "🏆 KLAN OYLAMASI",
-            [
-              "Aşağıdaki menüden bir klan seç.",
-              "",
-              `⏰ Bitiş: <t:${Math.floor(
-                config.end / 1000
-              )}:R>`,
-              "⚠️ Oyunuzu değiştiremezsiniz."
-            ].join("\n")
-          )
-        ],
-        components: [
-          new ActionRowBuilder()
-            .addComponents(menu)
-        ]
-      });
-    }
-  }
-});
-
-async function finishGiveaway(id) {
-  const giveaway =
-    data.giveaways[id];
-
-  if (!giveaway) return;
-
-  const guild =
-    client.guilds.cache.get(
-      giveaway.guildId
-    );
-
-  if (!guild) {
-    delete data.giveaways[id];
-    save();
-    return;
-  }
-
-  const channel =
-    guild.channels.cache.get(
-      giveaway.channelId
-    );
-
-  if (!channel) {
-    delete data.giveaways[id];
-    save();
-    return;
-  }
-
-  const participants =
-    [...new Set(
-      giveaway.participants
-    )];
-
-  for (
-    let i = participants.length - 1;
-    i > 0;
-    i--
-  ) {
-    const random =
-      Math.floor(
-        Math.random() * (i + 1)
-      );
-
-    [
-      participants[i],
-      participants[random]
-    ] = [
-      participants[random],
-      participants[i]
-    ];
-  }
-
-  const winners =
-    participants.slice(
-      0,
-      Math.min(
-        giveaway.winnerCount,
-        participants.length
-      )
-    );
-
-  if (!winners.length) {
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "🎉 Çekiliş Bitti",
-          `**${giveaway.prize}** çekilişine yeterli katılım olmadı.`
-        )
-      ]
-    }).catch(() => {});
-  } else {
-    await channel.send({
-      content: winners
-        .map(id => `<@${id}>`)
-        .join(", "),
-      embeds: [
-        createEmbed(
-          "🏆 ÇEKİLİŞ SONUCU",
-          [
-            `🎁 **Ödül:** ${giveaway.prize}`,
-            "",
-            "Kazananlar yukarıda etiketlenmiştir.",
-            "🎫 Ödülünüzü talep etmek için ticket açabilirsiniz."
-          ].join("\n")
-        )
-      ]
-    }).catch(() => {});
-  }
-
-  const message =
-    await channel.messages
-      .fetch(giveaway.messageId)
-      .catch(() => null);
-
-  if (message) {
-    await message.edit({
-      components: []
-    }).catch(() => {});
-  }
-
-  delete data.giveaways[id];
-  save();
-}
-
-setInterval(() => {
-  const now = Date.now();
-
-  for (
-    const [id, giveaway]
-    of Object.entries(data.giveaways)
-  ) {
-    if (now >= giveaway.end) {
-      finishGiveaway(id);
-    }
-  }
-}, 5000);
-client.on("interactionCreate", async interaction => {
-  if (interaction.isButton()) {
-    const id = interaction.customId;
-
-    if (id.startsWith("giveaway_join:")) {
-      const giveawayId =
-        id.split(":")[1];
-
-      const giveaway =
-        data.giveaways[giveawayId];
-
-      if (!giveaway) {
-        return interaction.reply({
-          content:
-            "❌ Bu çekiliş artık aktif değil.",
-          ephemeral: true
-        });
-      }
-
-      if (
-        Date.now() >=
-        giveaway.end
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Bu çekiliş sona ermiş.",
-          ephemeral: true
-        });
-      }
-
-      if (
-        giveaway.participants.includes(
-          interaction.user.id
-        )
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Çekilişe zaten katıldın.",
-          ephemeral: true
-        });
-      }
-
-      giveaway.participants.push(
-        interaction.user.id
-      );
-
-      save();
-
-      return interaction.reply({
-        content:
-          "🎉 Çekilişe başarıyla katıldın!",
-        ephemeral: true
-      });
-    }
-
-    if (id.startsWith("drop_claim:")) {
-      const dropId =
-        id.split(":")[1];
-
-      const drop =
-        data.drops[dropId];
-
-      if (!drop) {
-        return interaction.reply({
-          content:
-            "❌ Bu drop artık aktif değil.",
-          ephemeral: true
-        });
-      }
-
-      if (drop.winner) {
-        return interaction.reply({
-          content:
-            "❌ Bu drop zaten kazanıldı.",
-          ephemeral: true
-        });
-      }
-
-      drop.winner =
-        interaction.user.id;
-
-      save();
-
-      await interaction.update({
-        embeds: [
-          createEmbed(
-            "🎁 DROP KAZANILDI!",
-            [
-              `🏆 **Kazanan:** ${interaction.user}`,
-              `🎁 **Ödül:** ${drop.prize}`,
-              "",
-              "🎫 Ödülünüzü talep etmek için ticket açabilirsiniz."
-            ].join("\n")
-          )
-        ],
-        components: []
-      });
+      setTimeout(() => {
+        warning.delete().catch(() => {});
+      }, 5000);
 
       return;
     }
 
-    if (id.startsWith("ticket_create:")) {
-      const config =
-        getTicketConfig(
-          interaction.guild.id
-        );
+    const score = Number(args[0]);
 
-      if (!config) {
-        return interaction.reply({
-          content:
-            "❌ Ticket sistemi henüz kurulmamış.",
-          ephemeral: true
-        });
-      }
-
-      const existing =
-        Object.values(data.tickets)
-          .find(ticket =>
-            ticket.guildId ===
-              interaction.guild.id &&
-            ticket.userId ===
-              interaction.user.id &&
-            ticket.closed !== true
-          );
-
-      if (existing) {
-        return interaction.reply({
-          content:
-            `❌ Zaten açık bir ticketın var: <#${existing.channel}>`,
-          ephemeral: true
-        });
-      }
-
-      const category =
-        interaction.guild.channels.cache.get(
-          config.category
-        );
-
-      if (
-        !category ||
-        category.type !==
-          ChannelType.GuildCategory
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Ticket kategorisi bulunamadı.",
-          ephemeral: true
-        });
-      }
-
-      const channel =
-        await interaction.guild.channels.create({
-          name:
-            `ticket-${interaction.user.username}`
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, "")
-              .slice(0, 90),
-          type: ChannelType.GuildText,
-          parent: category.id,
-          permissionOverwrites: [
-            {
-              id:
-                interaction.guild.roles.everyone.id,
-              deny: [
-                PermissionFlagsBits.ViewChannel
-              ]
-            },
-            {
-              id: interaction.user.id,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory
-              ]
-            },
-            {
-              id: config.role,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.ManageMessages
-              ]
-            }
-          ]
-        });
-
-      const ticketId =
-        `${interaction.guild.id}-${Date.now()}`;
-
-      data.tickets[ticketId] = {
-        guildId:
-          interaction.guild.id,
-        channel: channel.id,
-        userId:
-          interaction.user.id,
-        created:
-          Date.now(),
-        closed: false
-      };
-
-      save();
-
-      const row =
-        new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId(
-                "ticket_close"
-              )
-              .setLabel("🔒 Ticketi Kapat")
-              .setStyle(
-                ButtonStyle.Danger
-              )
-          );
-
-      await channel.send({
-        content:
-          `${interaction.user} <@&${config.role}>`,
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      return message.reply({
         embeds: [
-          createEmbed(
-            "🎫 Ticket Açıldı",
-            [
-              `Hoş geldin ${interaction.user}!`,
-              "",
-              "Yetkili ekip en kısa sürede seninle ilgilenecektir.",
-              "",
-              "Ticketi kapatmak için aşağıdaki butonu kullanabilirsin."
-            ].join("\n")
+          makeEmbed(
+            "⭐ Geçersiz Puan",
+            "Lütfen **1 ile 5 arasında** bir puan ver.\n\nÖrnek: `!puanver 5`"
           )
-        ],
-        components: [row]
-      });
-
-      return interaction.reply({
-        content:
-          `✅ Ticketın oluşturuldu: ${channel}`,
-        ephemeral: true
+        ]
       });
     }
 
-    if (id === "ticket_close") {
-      const result =
-        getTicketByChannel(
-          interaction.channel.id
-        );
-
-      if (!result) {
-        return interaction.reply({
-          content:
-            "❌ Bu kanal bir ticket değil.",
-          ephemeral: true
-        });
-      }
-
-      const [
-        ticketId,
-        ticket
-      ] = result;
-
-      const config =
-        getTicketConfig(
-          interaction.guild.id
-        );
-
-      const isOwner =
-        ticket.userId ===
-        interaction.user.id;
-
-      const isStaff =
-        config &&
-        interaction.member.roles.cache.has(
-          config.role
-        );
-
-      if (!isOwner && !isStaff) {
-        return interaction.reply({
-          content:
-            "❌ Bu ticketi kapatmaya yetkin yok.",
-          ephemeral: true
-        });
-      }
-
-      await interaction.reply(
-        "🔒 Ticket kapatılıyor ve transcript hazırlanıyor..."
-      );
-
-      await createTranscript(
-        interaction.guild,
-        interaction.channel,
-        ticket
-      );
-
-      delete data.tickets[
-        ticketId
-      ];
-
-      save();
-
-      setTimeout(() => {
-        interaction.channel
-          .delete()
-          .catch(() => {});
-      }, 2000);
+    if (guildData.rating.votes[message.author.id]) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⚠️ Zaten Oy Verdiniz",
+            "Sunucuya daha önce puan verdin. Bir kullanıcı yalnızca bir kez oy verebilir."
+          )
+        ]
+      });
     }
+
+    guildData.rating.votes[message.author.id] = score;
+    saveData();
+
+    const stars = "⭐".repeat(score);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("⭐ Sunucu Puanı Alındı")
+      .setDescription(
+        `${message.author} sunucuya **${score}/5** puan verdi.\n\n${stars}`
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Puan Sistemi"
+      });
+
+    return message.reply({
+      embeds: [embed]
+    });
   }
 
-  if (
-    interaction.isStringSelectMenu()
-  ) {
-    if (
-      interaction.customId ===
-      "ticket_category_select"
-    ) {
-      const config =
-        getTicketConfig(
-          interaction.guild.id
-        );
-
-      if (!config) {
-        return interaction.reply({
-          content:
-            "❌ Ticket sistemi bulunamadı.",
-          ephemeral: true
-        });
-      }
-
-      const existing =
-        Object.values(data.tickets)
-          .find(ticket =>
-            ticket.guildId ===
-              interaction.guild.id &&
-            ticket.userId ===
-              interaction.user.id &&
-            ticket.closed !== true
-          );
-
-      if (existing) {
-        return interaction.reply({
-          content:
-            `❌ Zaten açık bir ticketın var: <#${existing.channel}>`,
-          ephemeral: true
-        });
-      }
-
-      const selected =
-        interaction.values[0];
-
-      const category =
-        config.categories?.[selected];
-
-      if (!category) {
-        return interaction.reply({
-          content:
-            "❌ Bu ticket kategorisi bulunamadı.",
-          ephemeral: true
-        });
-      }
-
-      const parent =
-        interaction.guild.channels.cache.get(
-          category.id
-        );
-
-      if (
-        !parent ||
-        parent.type !==
-          ChannelType.GuildCategory
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Kategori bulunamadı.",
-          ephemeral: true
-        });
-      }
-
-      const channel =
-        await interaction.guild.channels.create({
-          name:
-            `ticket-${interaction.user.username}`
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, "")
-              .slice(0, 90),
-          type: ChannelType.GuildText,
-          parent: parent.id,
-          permissionOverwrites: [
-            {
-              id:
-                interaction.guild.roles.everyone.id,
-              deny: [
-                PermissionFlagsBits.ViewChannel
-              ]
-            },
-            {
-              id: interaction.user.id,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory
-              ]
-            },
-            {
-              id: config.role,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.ManageMessages
-              ]
-            }
-          ]
-        });
-
-      const ticketId =
-        `${interaction.guild.id}-${Date.now()}`;
-
-      data.tickets[ticketId] = {
-        guildId:
-          interaction.guild.id,
-        channel:
-          channel.id,
-        userId:
-          interaction.user.id,
-        category:
-          selected,
-        created:
-          Date.now(),
-        closed: false
-      };
-
-      save();
-
-      const row =
-        new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId(
-                "ticket_close"
-              )
-              .setLabel("🔒 Ticketi Kapat")
-              .setStyle(
-                ButtonStyle.Danger
-              )
-          );
-
-      await channel.send({
-        content:
-          `${interaction.user} <@&${config.role}>`,
+  if (command === "öneri" || command === "oneri") {
+    if (!guildData.suggestion.channelId) {
+      return message.reply({
         embeds: [
-          createEmbed(
-            `🎫 ${category.name}`,
-            [
-              `Hoş geldin ${interaction.user}!`,
-              "",
-              `📂 **Kategori:** ${category.name}`,
-              "Yetkili ekip seninle en kısa sürede ilgilenecektir.",
-              "",
-              "Ticketi kapatmak için aşağıdaki butonu kullan."
-            ].join("\n")
+          makeEmbed(
+            "⚠️ Öneri Sistemi Kurulu Değil",
+            "Yönetici panelinden önce öneri kanalını oluşturmalısın."
           )
-        ],
-        components: [row]
-      });
-
-      return interaction.reply({
-        content:
-          `✅ Ticket oluşturuldu: ${channel}`,
-        ephemeral: true
+        ]
       });
     }
 
     if (
-      interaction.customId.startsWith(
-        "clan_vote:"
-      )
+      message.channel.id !== guildData.suggestion.channelId
     ) {
-      const guildId =
-        interaction.customId.split(":")[1];
+      return;
+    }
 
-      const config =
-        getClanConfig(guildId);
+    const suggestion = args.join(" ");
 
-      if (!config?.active) {
-        return interaction.reply({
-          content:
-            "❌ Klan oylaması aktif değil.",
-          ephemeral: true
-        });
-      }
-
-      if (
-        Date.now() >=
-        config.end
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Klan oylaması sona erdi.",
-          ephemeral: true
-        });
-      }
-
-      data.clanVotes[guildId] ||= {};
-
-      if (
-        data.clanVotes[guildId]
-          [interaction.user.id]
-      ) {
-        return interaction.reply({
-          content:
-            "❌ Daha önce oy verdin ve oyun değiştirilemez.",
-          ephemeral: true
-        });
-      }
-
-      const index =
-        Number(interaction.values[0]);
-
-      const clans =
-        getClanList(guildId);
-
-      const clan =
-        clans[index];
-
-      if (!clan) {
-        return interaction.reply({
-          content:
-            "❌ Klan bulunamadı.",
-          ephemeral: true
-        });
-      }
-
-      clan.votes =
-        (clan.votes || 0) + 1;
-
-      data.clanVotes[guildId]
-        [interaction.user.id] =
-        clan.name;
-
-      save();
-
-      return interaction.reply({
-        content:
-          `✅ **${clan.name}** klanına oyun kaydedildi. Oyunu değiştiremezsin.`,
-        ephemeral: true
+    if (!suggestion) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "💡 Öneri Eksik",
+            "Örnek kullanım:\n`!öneri Sunucuya yeni bir sistem eklensin.`"
+          )
+        ]
       });
     }
-  }
-});
 
-async function createTranscript(
-  guild,
-  channel,
-  ticket
-) {
-  const messages = [];
-
-  let lastId;
-
-  while (true) {
-    const fetched =
-      await channel.messages.fetch({
-        limit: 100,
-        ...(lastId
-          ? { before: lastId }
-          : {})
-      }).catch(() => null);
-
-    if (!fetched || !fetched.size)
-      break;
-
-    messages.push(
-      ...fetched.values()
-    );
-
-    lastId =
-      fetched.last().id;
-
-    if (fetched.size < 100)
-      break;
-  }
-
-  messages.reverse();
-
-  let transcript =
-    `TICKET TRANSCRIPT\n\n`;
-
-  transcript +=
-    `Sunucu: ${guild.name}\n`;
-
-  transcript +=
-    `Ticket Sahibi: ${ticket.userId}\n`;
-
-  transcript +=
-    `Kanal: ${channel.name}\n`;
-
-  transcript +=
-    `Oluşturulma: ${new Date(
-      ticket.created
-    ).toLocaleString()}\n\n`;
-
-  for (const message of messages) {
-    transcript +=
-      `[${message.createdAt.toLocaleString()}] `;
-
-    transcript +=
-      `${message.author.tag}: `;
-
-    transcript +=
-      message.content || "[Dosya/Embed]";
-
-    transcript += "\n";
-  }
-
-  const file =
-    `./transcript-${Date.now()}.txt`;
-
-  fs.writeFileSync(
-    file,
-    transcript
-  );
-
-  const owner =
-    await guild.members
-      .fetch(ticket.userId)
-      .catch(() => null);
-
-  const config =
-    getTicketConfig(guild.id);
-
-  const staffRole =
-    config
-      ? guild.roles.cache.get(
-          config.role
-        )
-      : null;
-
-  const users = new Map();
-
-  if (owner) {
-    users.set(
-      owner.id,
-      owner.user
-    );
-  }
-
-  if (staffRole) {
-    staffRole.members.forEach(
-      member => {
-        users.set(
-          member.id,
-          member.user
-        );
-      }
-    );
-  }
-
-  const serverOwner =
-    await guild.fetchOwner()
-      .catch(() => null);
-
-  if (serverOwner) {
-    users.set(
-      serverOwner.id,
-      serverOwner.user
-    );
-  }
-
-  for (const user of users.values()) {
-    await user.send({
-      content:
-        `🎫 **${guild.name}** ticket transcripti.`,
-      files: [file]
-    }).catch(() => {});
-  }
-
-  fs.unlinkSync(file);
-}
-client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith("!")) return;
-
-  const args = message.content.slice(1).trim().split(/\s+/);
-  const command = args.shift()?.toLowerCase();
-
-  if (command !== "panel") return;
-
-  if (!isAdmin(message.member)) {
-    return message.reply(
-      "❌ Bu paneli sadece Yönetici yetkisine sahip kişiler kullanabilir."
-    );
-  }
-
-  const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("panel_ticket")
-      .setLabel("🎫 Ticket Kur")
-      .setStyle(ButtonStyle.Primary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_roleall")
-      .setLabel("👥 Toplurolver")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
-      .setCustomId("panel_rolal")
-      .setLabel("👥 Toplurolal")
-      .setStyle(ButtonStyle.Danger)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("panel_suggestion")
-      .setLabel("💡 Öneri Kanalı Oluştur")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_role")
-      .setLabel("🎭 Rolver")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_autorole")
-      .setLabel("🤖 OtoRol")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("panel_welcome")
-      .setLabel("🤩 Hoşgeldin Kanalı Oluştur")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_rating")
-      .setLabel("⭐ Puan Verme Kanalı Aç")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_voice")
-      .setLabel("🔊 Ses Oluştur")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  const row4 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("panel_clan")
-      .setLabel("🏆 Klan Oylaması")
-      .setStyle(ButtonStyle.Primary),
-
-    new ButtonBuilder()
-      .setCustomId("panel_announcement")
-      .setLabel("📢 Anons")
-      .setStyle(ButtonStyle.Primary)
-  );
-
-  return message.channel.send({
-    embeds: [
-      createEmbed(
-        "⚙️ Yönetici Paneli",
-        [
-          "Sunucunun sistemlerini aşağıdaki butonlardan yönetebilirsin.",
-          "",
-          "🎫 **Ticket Kur**",
-          "Ticket kategorilerini, panel kanalını ve ticket yetkilisi rolünü ayarlar.",
-          "",
-          "👥 **Toplurolver / Toplurolal**",
-          "Seçilen rolü sunucudaki üyelere topluca verir veya alır.",
-          "",
-          "💡 **Öneri Kanalı Oluştur**",
-          "🆘|öneri kanalını oluşturur.",
-          "",
-          "🎭 **Rolver**",
-          "Belirlenen kullanıcıya belirlenen rolü verir.",
-          "",
-          "🤖 **OtoRol**",
-          "Yeni katılan üyelere otomatik rol verir.",
-          "",
-          "🤩 **Hoşgeldin Kanalı Oluştur**",
-          "🤩|giriş-çıkış kanalını oluşturur.",
-          "",
-          "⭐ **Puan Verme Kanalı Aç**",
-          "Sadece `!puanver 1-5` kullanılabilen kanal oluşturur.",
-          "",
-          "🔊 **Ses Oluştur**",
-          "Belirlenen ses kanalına katılan kişiye özel ses kanalı oluşturur.",
-          "",
-          "🏆 **Klan Oylaması**",
-          "Klan oylama sistemini açar ve süresini belirler.",
-          "",
-          "📢 **Anons**",
-          "Duyuruyu hem duyuru kanalına hem sohbet kanalına gönderir."
-        ].join("\n")
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setAuthor({
+        name: `${message.author.tag} tarafından önerildi`,
+        iconURL: message.author.displayAvatarURL()
+      })
+      .setTitle("💡 Yeni Öneri")
+      .setDescription(`> ${suggestion}`)
+      .addFields(
+        {
+          name: "📊 Oylama",
+          value: "👍 0  👎 0"
+        }
       )
-    ],
-    components: [
-      row1,
-      row2,
-      row3,
-      row4
-    ]
-  });
-});
-
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isButton()) return;
-
-  const id = interaction.customId;
-
-  if (id === "panel_ticket") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Öneri Sistemi"
       });
-    }
 
-    const modal = new ModalBuilder()
-      .setCustomId("ticket_setup_modal")
-      .setTitle("🎫 Ticket Kur");
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("suggestion_up")
+        .setEmoji("👍")
+        .setLabel("0")
+        .setStyle(ButtonStyle.Success),
 
-    const categoryInput =
-      new TextInputBuilder()
-        .setCustomId("ticket_categories")
-        .setLabel("Ticket kategorileri")
-        .setPlaceholder("Destek, Şikayet, Satın Alım")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
-
-    const channelInput =
-      new TextInputBuilder()
-        .setCustomId("ticket_channel")
-        .setLabel("Panel kanal ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    const categoryIdInput =
-      new TextInputBuilder()
-        .setCustomId("ticket_category_id")
-        .setLabel("Ticket kategori ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    const roleInput =
-      new TextInputBuilder()
-        .setCustomId("ticket_role")
-        .setLabel("Ticket yetkilisi rol ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        categoryInput
-      ),
-      new ActionRowBuilder().addComponents(
-        channelInput
-      ),
-      new ActionRowBuilder().addComponents(
-        categoryIdInput
-      ),
-      new ActionRowBuilder().addComponents(
-        roleInput
-      )
+      new ButtonBuilder()
+        .setCustomId("suggestion_down")
+        .setEmoji("👎")
+        .setLabel("0")
+        .setStyle(ButtonStyle.Danger)
     );
 
-    return interaction.showModal(modal);
-  }
+    try {
+      await message.delete();
+    } catch {}
 
-  if (id === "panel_suggestion") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
-      });
-    }
-
-    const channel =
-      await interaction.guild.channels.create({
-        name: "🆘|öneri",
-        type: ChannelType.GuildText
-      });
-
-    data.suggestion[
-      interaction.guild.id
-    ] = channel.id;
-
-    save();
-
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "💡 Öneri Kanalı",
-          "Sunucu için önerilerinizi `!öneri <öneriniz>` şeklinde gönderebilirsiniz."
-        )
-      ]
-    });
-
-    return interaction.reply({
-      content:
-        `✅ Öneri kanalı oluşturuldu: ${channel}`,
-      ephemeral: true
+    return message.channel.send({
+      embeds: [embed],
+      components: [row]
     });
   }
 
-  if (id === "panel_rating") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
+  if (command === "ticket") {
+    if (!isStaff(message.member)) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⛔ Yetkin Yok",
+            "Bu komutu kullanmak için **Sunucuyu Yönet** yetkisine sahip olmalısın."
+          )
+        ]
       });
     }
 
-    const existing =
-      data.ratingChannel[
-        interaction.guild.id
-      ];
-
-    if (existing) {
-      const channel =
-        interaction.guild.channels.cache.get(
-          existing
-        );
-
-      if (channel) {
-        return interaction.reply({
-          content:
-            `❌ Zaten bir puan verme kanalı var: ${channel}`,
-          ephemeral: true
-        });
-      }
-    }
-
-    const channel =
-      await interaction.guild.channels.create({
-        name: "⭐|puan-ver",
-        type: ChannelType.GuildText
-      });
-
-    data.ratingChannel[
-      interaction.guild.id
-    ] = channel.id;
-
-    save();
-
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "⭐ Sunucu Puanlama",
-          [
-            "Bu kanal sadece sunucuya puan vermek içindir.",
-            "",
-            "`!puanver <1-5>`",
-            "",
-            "Örnek:",
-            "`!puanver 5`"
-          ].join("\n")
-        )
-      ]
-    });
-
-    return interaction.reply({
-      content:
-        `✅ Puan verme kanalı oluşturuldu: ${channel}`,
-      ephemeral: true
-    });
-  }
-
-  if (id === "panel_welcome") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
+    if (!guildData.ticket.categoryId) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⚠️ Ticket Sistemi Kurulu Değil",
+            "Önce `!panel` üzerinden ticket sistemini kur."
+          )
+        ]
       });
     }
 
     const category =
-      await interaction.guild.channels.create({
-        name: "🤩 Giriş-Çıkış",
-        type: ChannelType.GuildCategory
-      });
-
-    const channel =
-      await interaction.guild.channels.create({
-        name: "🤩|giriş-çıkış",
-        type: ChannelType.GuildText,
-        parent: category.id
-      });
-
-    data.welcome[
-      interaction.guild.id
-    ] = channel.id;
-
-    save();
-
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "🤩 Hoşgeldin Sistemi",
-          "Yeni üyelerin giriş ve çıkış bilgileri bu kanalda gösterilecektir."
-        )
-      ]
-    });
-
-    return interaction.reply({
-      content:
-        `✅ Hoşgeldin kanalı oluşturuldu: ${channel}`,
-      ephemeral: true
-    });
-  }
-
-  if (id === "panel_voice") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
-      });
-    }
-
-    const modal = new ModalBuilder()
-      .setCustomId("voice_setup_modal")
-      .setTitle("🔊 Ses Oluştur");
-
-    const input =
-      new TextInputBuilder()
-        .setCustomId("voice_channel")
-        .setLabel("Ses oluşturma kanalı ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        input
-      )
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (id === "panel_clan") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
-      });
-    }
-
-    const modal = new ModalBuilder()
-      .setCustomId("clan_setup_modal")
-      .setTitle("🏆 Klan Oylaması");
-
-    const timeInput =
-      new TextInputBuilder()
-        .setCustomId("clan_time")
-        .setLabel("Oylama süresi")
-        .setPlaceholder("1h")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        timeInput
-      )
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (id === "panel_announcement") {
-    if (!isAdmin(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Sadece Yönetici kullanabilir.",
-        ephemeral: true
-      });
-    }
-
-    const modal = new ModalBuilder()
-      .setCustomId("announcement_modal")
-      .setTitle("📢 Anons Gönder");
-
-    const text =
-      new TextInputBuilder()
-        .setCustomId("announcement_text")
-        .setLabel("Anons metni")
-        .setPlaceholder("Duyurunu buraya yaz...")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setMaxLength(4000);
-
-    const channel =
-      new TextInputBuilder()
-        .setCustomId("announcement_channel")
-        .setLabel("Duyuru kanalı ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    const chat =
-      new TextInputBuilder()
-        .setCustomId("announcement_chat")
-        .setLabel("Sohbet kanalı ID")
-        .setPlaceholder("123456789012345678")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(text),
-      new ActionRowBuilder().addComponents(channel),
-      new ActionRowBuilder().addComponents(chat)
-    );
-
-    return interaction.showModal(modal);
-  }
-});
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isModalSubmit()) return;
-
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({
-      content: "❌ Sadece Yönetici kullanabilir.",
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "ticket_setup_modal") {
-    const categoriesText =
-      interaction.fields.getTextInputValue(
-        "ticket_categories"
+      message.guild.channels.cache.get(
+        guildData.ticket.categoryId
       );
-
-    const panelChannelId =
-      interaction.fields.getTextInputValue(
-        "ticket_channel"
-      ).trim();
-
-    const defaultCategoryId =
-      interaction.fields.getTextInputValue(
-        "ticket_category_id"
-      ).trim();
-
-    const roleId =
-      interaction.fields.getTextInputValue(
-        "ticket_role"
-      ).trim();
-
-    const panelChannel =
-      interaction.guild.channels.cache.get(
-        panelChannelId
-      );
-
-    const category =
-      interaction.guild.channels.cache.get(
-        defaultCategoryId
-      );
-
-    const role =
-      interaction.guild.roles.cache.get(
-        roleId
-      );
-
-    if (
-      !panelChannel ||
-      panelChannel.type !== ChannelType.GuildText
-    ) {
-      return interaction.reply({
-        content: "❌ Panel kanalı bulunamadı.",
-        ephemeral: true
-      });
-    }
 
     if (
       !category ||
       category.type !== ChannelType.GuildCategory
     ) {
-      return interaction.reply({
-        content: "❌ Ticket kategorisi bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (!role) {
-      return interaction.reply({
-        content: "❌ Ticket yetkilisi rolü bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    const names =
-      categoriesText
-        .split(",")
-        .map(name => name.trim())
-        .filter(Boolean);
-
-    if (!names.length) {
-      return interaction.reply({
-        content: "❌ En az bir ticket kategorisi yazmalısın.",
-        ephemeral: true
-      });
-    }
-
-    const categories = {};
-
-    names.forEach((name, index) => {
-      categories[String(index)] = {
-        name,
-        id: defaultCategoryId
-      };
-    });
-
-    data.ticketConfig[
-      interaction.guild.id
-    ] = {
-      panelChannel: panelChannelId,
-      category: defaultCategoryId,
-      role: roleId,
-      categories
-    };
-
-    save();
-
-    const options =
-      names.map((name, index) => ({
-        label: name.slice(0, 100),
-        value: String(index),
-        description:
-          `${name} ticketı oluştur`
-      }));
-
-    const menu =
-      new StringSelectMenuBuilder()
-        .setCustomId(
-          "ticket_category_select"
-        )
-        .setPlaceholder(
-          "🎫 Ticket kategorisini seç"
-        )
-        .addOptions(options);
-
-    await panelChannel.send({
-      embeds: [
-        createEmbed(
-          "🎫 Ticket Sistemi",
-          [
-            "Destek almak için aşağıdaki menüden uygun ticket kategorisini seç.",
-            "",
-            "📌 Her kullanıcı aynı anda yalnızca **1 ticket** açabilir.",
-            "🔒 Ticket kapatıldığında transcript gönderilir."
-          ].join("\n")
-        )
-      ],
-      components: [
-        new ActionRowBuilder()
-          .addComponents(menu)
-      ]
-    });
-
-    return interaction.reply({
-      content:
-        `✅ Ticket sistemi kuruldu ve ${panelChannel} kanalına panel gönderildi.`,
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "voice_setup_modal") {
-    const voiceChannelId =
-      interaction.fields.getTextInputValue(
-        "voice_channel"
-      ).trim();
-
-    const channel =
-      interaction.guild.channels.cache.get(
-        voiceChannelId
-      );
-
-    if (
-      !channel ||
-      channel.type !== ChannelType.GuildVoice
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Belirtilen ses kanalı bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    data.voiceCreator[
-      interaction.guild.id
-    ] = {
-      channelId: voiceChannelId,
-      created: {}
-    };
-
-    save();
-
-    return interaction.reply({
-      content:
-        `✅ Ses oluşturma sistemi aktif edildi.\nKatılma kanalı: ${channel}`,
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "clan_setup_modal") {
-    const time =
-      interaction.fields.getTextInputValue(
-        "clan_time"
-      ).trim();
-
-    const duration =
-      parseTime(time);
-
-    if (!duration) {
-      return interaction.reply({
-        content:
-          "❌ Geçerli bir süre gir. Örnek: `1h`, `30m`, `2d`",
-        ephemeral: true
-      });
-    }
-
-    data.clanConfig[
-      interaction.guild.id
-    ] = {
-      active: true,
-      start: Date.now(),
-      end: Date.now() + duration
-    };
-
-    data.clans[
-      interaction.guild.id
-    ] ||= [];
-
-    data.clanVotes[
-      interaction.guild.id
-    ] = {};
-
-    save();
-
-    setTimeout(
-      () => finishClanVote(
-        interaction.guild.id
-      ),
-      duration
-    );
-
-    return interaction.reply({
-      content:
-        `✅ Klan oylaması açıldı.\n⏰ Süre: **${time}**`,
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "announcement_modal") {
-    const text =
-      interaction.fields.getTextInputValue(
-        "announcement_text"
-      );
-
-    const announcementChannelId =
-      interaction.fields.getTextInputValue(
-        "announcement_channel"
-      ).trim();
-
-    const chatChannelId =
-      interaction.fields.getTextInputValue(
-        "announcement_chat"
-      ).trim();
-
-    const announcementChannel =
-      interaction.guild.channels.cache.get(
-        announcementChannelId
-      );
-
-    const chatChannel =
-      interaction.guild.channels.cache.get(
-        chatChannelId
-      );
-
-    if (!announcementChannel) {
-      return interaction.reply({
-        content:
-          "❌ Duyuru kanalı bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (!chatChannel) {
-      return interaction.reply({
-        content:
-          "❌ Sohbet kanalı bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    await announcementChannel.send({
-      content: "@everyone @here",
-      embeds: [
-        createEmbed(
-          "📢 ANONS",
-          text
-        )
-      ]
-    }).catch(() => {});
-
-    await chatChannel.send({
-      embeds: [
-        createEmbed(
-          "📢 ANONS",
-          text
-        )
-      ]
-    }).catch(() => {});
-
-    return interaction.reply({
-      content:
-        "✅ Anons duyuru ve sohbet kanallarına gönderildi.",
-      ephemeral: true
-    });
-  }
-});
-
-async function finishClanVote(guildId) {
-  const config =
-    data.clanConfig[guildId];
-
-  if (!config || !config.active)
-    return;
-
-  if (Date.now() < config.end)
-    return;
-
-  const guild =
-    client.guilds.cache.get(
-      guildId
-    );
-
-  if (!guild) return;
-
-  const clans =
-    data.clans[guildId] || [];
-
-  clans.sort(
-    (a, b) =>
-      (b.votes || 0) -
-      (a.votes || 0)
-  );
-
-  const result =
-    clans.length
-      ? clans.map(
-          (clan, index) =>
-            `**${index + 1}. ${clan.name}** — ${clan.votes || 0} oy`
-        ).join("\n")
-      : "Henüz klan eklenmemiş.";
-
-  const channels =
-    guild.channels.cache.filter(
-      channel =>
-        channel.type ===
-        ChannelType.GuildText
-    );
-
-  const channel =
-    channels.find(
-      channel =>
-        channel.name.includes("klan")
-    );
-
-  if (channel) {
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "🏆 KLAN OYLAMASI BİTTİ",
-          [
-            "Oylama sona erdi!",
-            "",
-            result
-          ].join("\n")
-        )
-      ]
-    }).catch(() => {});
-  }
-
-  data.clanConfig[guildId].active =
-    false;
-
-  save();
-}
-
-setInterval(() => {
-  for (
-    const guildId of Object.keys(
-      data.clanConfig
-    )
-  ) {
-    const config =
-      data.clanConfig[guildId];
-
-    if (
-      config?.active &&
-      Date.now() >= config.end
-    ) {
-      finishClanVote(guildId);
-    }
-  }
-}, 5000);
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isButton()) return;
-
-  if (!isAdmin(interaction.member)) {
-    return;
-  }
-
-  if (interaction.customId === "panel_roleall") {
-    const modal = new ModalBuilder()
-      .setCustomId("roleall_modal")
-      .setTitle("👥 Toplurolver");
-
-    const roleInput = new TextInputBuilder()
-      .setCustomId("role_id")
-      .setLabel("Verilecek rol ID")
-      .setPlaceholder("123456789012345678")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(roleInput)
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (interaction.customId === "panel_rolal") {
-    const modal = new ModalBuilder()
-      .setCustomId("rolal_modal")
-      .setTitle("👥 Toplurolal");
-
-    const roleInput = new TextInputBuilder()
-      .setCustomId("role_id")
-      .setLabel("Alınacak rol ID")
-      .setPlaceholder("123456789012345678")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(roleInput)
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (interaction.customId === "panel_role") {
-    const modal = new ModalBuilder()
-      .setCustomId("role_modal")
-      .setTitle("🎭 Rolver");
-
-    const userInput = new TextInputBuilder()
-      .setCustomId("user_id")
-      .setLabel("Kullanıcı ID")
-      .setPlaceholder("123456789012345678")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const roleInput = new TextInputBuilder()
-      .setCustomId("role_id")
-      .setLabel("Verilecek rol ID")
-      .setPlaceholder("123456789012345678")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(userInput),
-      new ActionRowBuilder().addComponents(roleInput)
-    );
-
-    return interaction.showModal(modal);
-  }
-
-  if (interaction.customId === "panel_autorole") {
-    const modal = new ModalBuilder()
-      .setCustomId("autorole_modal")
-      .setTitle("🤖 OtoRol");
-
-    const roleInput = new TextInputBuilder()
-      .setCustomId("role_id")
-      .setLabel("Otomatik verilecek rol ID")
-      .setPlaceholder("123456789012345678")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(roleInput)
-    );
-
-    return interaction.showModal(modal);
-  }
-});
-
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isModalSubmit()) return;
-
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({
-      content: "❌ Sadece Yönetici kullanabilir.",
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "roleall_modal") {
-    const roleId =
-      interaction.fields.getTextInputValue("role_id").trim();
-
-    const role =
-      interaction.guild.roles.cache.get(roleId);
-
-    if (!role) {
-      return interaction.reply({
-        content: "❌ Rol bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (role.managed) {
-      return interaction.reply({
-        content:
-          "❌ Discord tarafından yönetilen bir rolü veremem.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      role.position >=
-      interaction.guild.members.me.roles.highest.position
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Bu rol botun en yüksek rolünden yüksek veya eşit.",
-        ephemeral: true
-      });
-    }
-
-    await interaction.deferReply({
-      ephemeral: true
-    });
-
-    const members =
-      await interaction.guild.members.fetch();
-
-    let success = 0;
-    let failed = 0;
-
-    for (const member of members.values()) {
-      if (member.user.bot) continue;
-
-      try {
-        if (!member.roles.cache.has(role.id)) {
-          await member.roles.add(role);
-          success++;
-        }
-      } catch {
-        failed++;
-      }
-    }
-
-    return interaction.editReply({
-      content:
-        `✅ **Toplurolver tamamlandı.**\n\n` +
-        `🎭 Rol: ${role}\n` +
-        `✅ Verilen: **${success}**\n` +
-        `❌ Verilemeyen: **${failed}**`
-    });
-  }
-
-  if (interaction.customId === "rolal_modal") {
-    const roleId =
-      interaction.fields.getTextInputValue("role_id").trim();
-
-    const role =
-      interaction.guild.roles.cache.get(roleId);
-
-    if (!role) {
-      return interaction.reply({
-        content: "❌ Rol bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (role.managed) {
-      return interaction.reply({
-        content:
-          "❌ Discord tarafından yönetilen bir rolü alamam.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      role.position >=
-      interaction.guild.members.me.roles.highest.position
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Bu rol botun en yüksek rolünden yüksek veya eşit.",
-        ephemeral: true
-      });
-    }
-
-    await interaction.deferReply({
-      ephemeral: true
-    });
-
-    const members =
-      await interaction.guild.members.fetch();
-
-    let success = 0;
-    let failed = 0;
-
-    for (const member of members.values()) {
-      if (member.user.bot) continue;
-
-      try {
-        if (member.roles.cache.has(role.id)) {
-          await member.roles.remove(role);
-          success++;
-        }
-      } catch {
-        failed++;
-      }
-    }
-
-    return interaction.editReply({
-      content:
-        `✅ **Toplurolal tamamlandı.**\n\n` +
-        `🎭 Rol: ${role}\n` +
-        `✅ Alınan: **${success}**\n` +
-        `❌ Alınamayan: **${failed}**`
-    });
-  }
-
-  if (interaction.customId === "role_modal") {
-    const userId =
-      interaction.fields.getTextInputValue("user_id").trim();
-
-    const roleId =
-      interaction.fields.getTextInputValue("role_id").trim();
-
-    const member =
-      await interaction.guild.members
-        .fetch(userId)
-        .catch(() => null);
-
-    if (!member) {
-      return interaction.reply({
-        content: "❌ Kullanıcı bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    const role =
-      interaction.guild.roles.cache.get(roleId);
-
-    if (!role) {
-      return interaction.reply({
-        content: "❌ Rol bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (role.managed) {
-      return interaction.reply({
-        content:
-          "❌ Discord tarafından yönetilen bir rolü veremem.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      role.position >=
-      interaction.guild.members.me.roles.highest.position
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Bu rol botun en yüksek rolünden yüksek veya eşit.",
-        ephemeral: true
-      });
-    }
-
-    try {
-      await member.roles.add(role);
-    } catch {
-      return interaction.reply({
-        content:
-          "❌ Rol kullanıcıya verilemedi.",
-        ephemeral: true
-      });
-    }
-
-    return interaction.reply({
-      content:
-        `✅ ${member} kullanıcısına ${role} rolü verildi.`,
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "autorole_modal") {
-    const roleId =
-      interaction.fields.getTextInputValue("role_id").trim();
-
-    const role =
-      interaction.guild.roles.cache.get(roleId);
-
-    if (!role) {
-      return interaction.reply({
-        content: "❌ Rol bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    if (role.managed) {
-      return interaction.reply({
-        content:
-          "❌ Discord tarafından yönetilen bir rol seçemezsin.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      role.position >=
-      interaction.guild.members.me.roles.highest.position
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Bu rol botun en yüksek rolünden yüksek veya eşit.",
-        ephemeral: true
-      });
-    }
-
-    data.autoRole[
-      interaction.guild.id
-    ] = role.id;
-
-    save();
-
-    return interaction.reply({
-      content:
-        `✅ OtoRol aktif edildi.\nYeni üyeler artık ${role} rolünü otomatik alacak.`,
-      ephemeral: true
-    });
-  }
-});
-client.on("guildMemberAdd", async member => {
-  const roleId =
-    data.autoRole[member.guild.id];
-
-  if (roleId) {
-    const role =
-      member.guild.roles.cache.get(roleId);
-
-    if (role) {
-      await member.roles.add(role).catch(() => {});
-    }
-  }
-
-  const welcomeId =
-    data.welcome[member.guild.id];
-
-  if (!welcomeId) return;
-
-  const channel =
-    member.guild.channels.cache.get(welcomeId);
-
-  if (!channel) return;
-
-  const accountAge =
-    Date.now() -
-    member.user.createdTimestamp;
-
-  const months =
-    accountAge /
-    (1000 * 60 * 60 * 24 * 30);
-
-  let reliability;
-
-  if (months < 2) {
-    reliability = "🔴 Güvenilir Değil";
-  } else if (months < 5) {
-    reliability = "🟡 Stabil";
-  } else if (months > 24) {
-    reliability = "🟢 %100 Güvenilir";
-  } else {
-    reliability = "🟢 Güvenilir";
-  }
-
-  await channel.send({
-    embeds: [
-      createEmbed(
-        "🤩 HOŞ GELDİN!",
-        [
-          `👤 **Üye:** ${member}`,
-          `📅 **Giriş tarihi:** <t:${Math.floor(
-            Date.now() / 1000
-          )}:F>`,
-          `🎂 **Hesap tarihi:** <t:${Math.floor(
-            member.user.createdTimestamp / 1000
-          )}:F>`,
-          `🛡️ **Güvenilirlik:** ${reliability}`,
-          "",
-          `🎉 **${member.guild.name}** sunucusuna hoş geldin!`
-        ].join("\n")
-      )
-    ]
-  }).catch(() => {});
-});
-
-client.on("guildMemberRemove", async member => {
-  const welcomeId =
-    data.welcome[member.guild.id];
-
-  if (!welcomeId) return;
-
-  const channel =
-    member.guild.channels.cache.get(welcomeId);
-
-  if (!channel) return;
-
-  await channel.send({
-    embeds: [
-      createEmbed(
-        "👋 ÜYE AYRILDI",
-        [
-          `👤 **Üye:** ${member.user.tag}`,
-          `📅 **Ayrılma:** <t:${Math.floor(
-            Date.now() / 1000
-          )}:F>`,
-          "",
-          "Üye sunucudan ayrıldı."
-        ].join("\n")
-      )
-    ]
-  }).catch(() => {});
-});
-
-client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild)
-    return;
-
-  const guildId =
-    message.guild.id;
-
-  const ratingChannel =
-    data.ratingChannel[guildId];
-
-  if (
-    ratingChannel &&
-    message.channel.id === ratingChannel
-  ) {
-    if (
-      !/^!puanver\s+[1-5]$/i.test(
-        message.content.trim()
-      )
-    ) {
-      await message.delete().catch(() => {});
-
-      const warning =
-        await message.channel.send(
-          "⚠️ Bu kanal sadece puan vermek içindir."
-        ).catch(() => null);
-
-      if (warning) {
-        setTimeout(
-          () => warning.delete().catch(() => {}),
-          3000
-        );
-      }
-
-      return;
-    }
-  }
-
-  if (
-    message.content
-      .toLowerCase()
-      .startsWith("!puanver")
-  ) {
-    const args =
-      message.content
-        .trim()
-        .split(/\s+/);
-
-    const score =
-      Number(args[1]);
-
-    if (
-      !ratingChannel ||
-      message.channel.id !== ratingChannel
-    ) {
-      return;
-    }
-
-    if (
-      !Number.isInteger(score) ||
-      score < 1 ||
-      score > 5
-    ) {
-      return;
-    }
-
-    data.ratings[guildId] ||= {};
-
-    data.ratings[guildId][
-      message.author.id
-    ] = score;
-
-    save();
-
-    const scores =
-      Object.values(
-        data.ratings[guildId]
-      ).map(Number);
-
-    const total =
-      scores.reduce(
-        (a, b) => a + b,
-        0
-      );
-
-    const average =
-      scores.length
-        ? total / scores.length
-        : 0;
-
-    const stars =
-      "⭐".repeat(score);
-
-    await message.reply({
-      embeds: [
-        createEmbed(
-          "⭐ PUANIN KAYDEDİLDİ",
-          [
-            `👤 **Üye:** ${message.author}`,
-            `⭐ **Verilen puan:** ${stars}`,
-            `📊 **Sunucu ortalaması:** ${average.toFixed(2)}/5`,
-            `👥 **Toplam değerlendirme:** ${scores.length}`
-          ].join("\n")
-        )
-      ]
-    }).then(msg => {
-      setTimeout(
-        () => msg.delete().catch(() => {}),
-        5000
-      );
-    }).catch(() => {});
-
-    return;
-  }
-
-  if (
-    message.content
-      .toLowerCase()
-      .startsWith("!öneri")
-  ) {
-    const suggestionChannel =
-      data.suggestion[guildId];
-
-    if (
-      !suggestionChannel ||
-      message.channel.id !==
-        suggestionChannel
-    ) {
-      return;
-    }
-
-    const suggestion =
-      message.content
-        .slice(6)
-        .trim();
-
-    if (!suggestion) {
-      await message.delete().catch(() => {});
-
-      const warning =
-        await message.channel.send(
-          "⚠️ Önerini `!öneri <önerin>` şeklinde yazmalısın."
-        ).catch(() => null);
-
-      if (warning) {
-        setTimeout(
-          () => warning.delete().catch(() => {}),
-          3000
-        );
-      }
-
-      return;
-    }
-
-    await message.delete().catch(() => {});
-
-    const suggestionMessage =
-      await message.channel.send({
+      return message.reply({
         embeds: [
-          createEmbed(
-            "💡 YENİ ÖNERİ",
-            [
-              `👤 **Gönderen:** ${message.author}`,
-              "",
-              `💬 **Öneri:**`,
-              suggestion
-            ].join("\n")
+          makeEmbed(
+            "❌ Kategori Bulunamadı",
+            "Ticket kategorisi artık mevcut değil. Panelden tekrar kur."
           )
         ]
       });
+    }
 
-    await suggestionMessage.react("👍")
-      .catch(() => {});
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🎫 LynoxNetwork Destek Merkezi")
+      .setDescription(
+        "Aşağıdaki seçeneklerden ihtiyacına uygun olanı seçerek ticket oluşturabilirsin.\n\n" +
+        "🎫 **Genel Destek**\n" +
+        "🛠️ **Yetkili Destek**\n" +
+        "🚨 **Şikayet / Bildirim**\n" +
+        "📩 **Diğer**\n\n" +
+        "⚠️ Her kullanıcı aynı anda yalnızca **1 ticket** açabilir."
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Ticket Sistemi"
+      });
 
-    await suggestionMessage.react("👎")
-      .catch(() => {});
-
-    return;
-  }
-});
-
-client.on("voiceStateUpdate", async (
-  oldState,
-  newState
-) => {
-  const guildId =
-    newState.guild.id;
-
-  const config =
-    data.voiceCreator[guildId];
-
-  if (!config) return;
-
-  if (
-    newState.channelId !==
-    config.channelId
-  ) {
-    return;
-  }
-
-  const member =
-    newState.member;
-
-  if (!member) return;
-
-  const channel =
-    await newState.guild.channels.create({
-      name:
-        `🔊・${member.user.username}`,
-      type:
-        ChannelType.GuildVoice,
-      parent:
-        newState.channel.parentId || null,
-      permissionOverwrites: [
-        {
-          id:
-            newState.guild.roles.everyone.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.Connect
-          ]
-        },
-        {
-          id: member.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.Connect,
-            PermissionFlagsBits.Speak,
-            PermissionFlagsBits.Stream,
-            PermissionFlagsBits.UseVAD
-          ]
-        }
-      ]
-    }).catch(() => null);
-
-  if (!channel) return;
-
-  config.created[member.id] =
-    channel.id;
-
-  save();
-
-  await member.voice
-    .setChannel(channel)
-    .catch(async () => {
-      await channel.delete()
-        .catch(() => {});
-
-      delete config.created[member.id];
-
-      save();
+    return message.channel.send({
+      embeds: [embed],
+      components: [createTicketButtons()]
     });
-});
-
-client.on("voiceStateUpdate", async (
-  oldState,
-  newState
-) => {
-  const guildId =
-    oldState.guild.id;
-
-  const config =
-    data.voiceCreator[guildId];
-
-  if (!config) return;
-
-  for (
-    const [userId, channelId]
-    of Object.entries(config.created)
-  ) {
-    const channel =
-      oldState.guild.channels.cache.get(
-        channelId
-      );
-
-    if (!channel) {
-      delete config.created[userId];
-      continue;
-    }
-
-    if (channel.members.size === 0) {
-      await channel.delete()
-        .catch(() => {});
-
-      delete config.created[userId];
-    }
   }
 
-  save();
-});
-
-client.on("messageCreate", async message => {
-  if (
-    message.author.bot ||
-    !message.guild
-  ) return;
-
-  if (
-    !message.content
-      .toLowerCase()
-      .startsWith("!serverinfo")
-  ) return;
-
-  const guild =
-    message.guild;
-
-  const ratings =
-    data.ratings[guild.id] || {};
-
-  const scores =
-    Object.values(ratings)
-      .map(Number);
-
-  const average =
-    scores.length
-      ? (
-          scores.reduce(
-            (a, b) => a + b,
-            0
-          ) /
-          scores.length
-        ).toFixed(2)
-      : "0.00";
-
-  const owner =
-    await guild.fetchOwner()
-      .catch(() => null);
-
-  await message.reply({
-    embeds: [
-      createEmbed(
-        `🌐 ${guild.name}`,
-        [
-          `👑 **Sunucu Sahibi:** ${owner || "Bilinmiyor"}`,
-          `👥 **Üye Sayısı:** ${guild.memberCount}`,
-          `📅 **Kurulma zamanı:** <t:${Math.floor(
-            guild.createdTimestamp / 1000
-          )}:F>`,
-          `⭐ **Sunucu puanı:** ${average}/5`,
-          `🗳️ **Toplam puan:** ${scores.length}`
-        ].join("\n")
-      )
-    ]
-  });
-});
-client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild) return;
-
-  const content = message.content.toLowerCase();
-
-  if (
-    badWords.some(word =>
-      normalizeText(content).includes(
-        normalizeText(word)
-      )
-    )
-  ) {
-    await message.delete().catch(() => {});
-
-    const warning =
-      await message.channel.send({
-        content:
-          `⚠️ ${message.author}, küfür kullanmak yasaktır.`
-      }).catch(() => null);
-
-    if (warning) {
-      setTimeout(
-        () => warning.delete().catch(() => {}),
-        3000
-      );
-    }
-
-    return;
-  }
-
-  if (content.startsWith("!avatar")) {
-    const target =
-      message.mentions.users.first() ||
-      message.author;
-
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`🖼️ ${target.username} Avatar`)
-          .setImage(
-            target.displayAvatarURL({
-              size: 4096,
-              extension: "png"
-            })
+  if (command === "çekiliş" || command === "cekilis") {
+    if (!isStaff(message.member)) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⛔ Yetkin Yok",
+            "Çekiliş başlatmak için **Sunucuyu Yönet** yetkisine sahip olmalısın."
           )
-          .setFooter({
-            text: `${target.tag}`
-          })
-      ]
-    });
-  }
-
-  if (content.startsWith("!klan add")) {
-    if (!isAdmin(message.member)) {
-      return message.reply(
-        "❌ Bu komutu sadece Yönetici kullanabilir."
-      );
+        ]
+      });
     }
 
-    const config =
-      data.clanConfig[message.guild.id];
-
-    if (!config?.active) {
-      return message.reply(
-        "❌ Önce `!klan oyla <süre>` ile klan oylamasını açmalısın."
-      );
-    }
-
-    const clanName =
-      message.content
-        .slice("!klan add".length)
-        .trim();
-
-    if (!clanName) {
-      return message.reply(
-        "❌ Klan adı belirtmelisin."
-      );
-    }
-
-    data.clans[
-      message.guild.id
-    ] ||= [];
-
-    const exists =
-      data.clans[
-        message.guild.id
-      ].some(
-        clan =>
-          clan.name.toLowerCase() ===
-          clanName.toLowerCase()
-      );
-
-    if (exists) {
-      return message.reply(
-        "❌ Bu klan zaten eklenmiş."
-      );
-    }
-
-    data.clans[
-      message.guild.id
-    ].push({
-      name: clanName,
-      votes: 0
-    });
-
-    save();
-
-    return message.reply({
-      embeds: [
-        createEmbed(
-          "🏆 KLAN EKLENDİ",
-          `✅ **${clanName}** klanı oylamaya eklendi.`
-        )
-      ]
-    });
-  }
-
-  if (content.startsWith("!klan oyla")) {
-    const args =
-      message.content
-        .trim()
-        .split(/\s+/);
-
-    const time =
-      args[2];
-
-    const duration =
-      parseTime(time);
-
-    if (!duration) {
-      return message.reply(
-        "❌ Kullanım: `!klan oyla 1h`"
-      );
-    }
-
-    data.clanConfig[
-      message.guild.id
-    ] = {
-      active: true,
-      start: Date.now(),
-      end: Date.now() + duration
-    };
-
-    data.clans[
-      message.guild.id
-    ] ||= [];
-
-    data.clanVotes[
-      message.guild.id
-    ] = {};
-
-    save();
-
-    const clans =
-      data.clans[
-        message.guild.id
-      ];
-
-    if (!clans.length) {
-      return message.reply(
-        "❌ Önce `!klan add <klan adı>` ile klan eklemelisin."
-      );
-    }
-
-    const menu =
-      new StringSelectMenuBuilder()
-        .setCustomId(
-          `clan_vote:${message.guild.id}`
-        )
-        .setPlaceholder(
-          "🏆 Oy vereceğin klanı seç"
-        )
-        .addOptions(
-          clans
-            .slice(0, 25)
-            .map((clan, index) => ({
-              label:
-                clan.name.slice(0, 100),
-              value:
-                String(index)
-            }))
-        );
-
-    await message.channel.send({
-      embeds: [
-        createEmbed(
-          "🏆 KLAN OYLAMASI",
-          [
-            `⏰ **Süre:** ${time}`,
-            "",
-            "Aşağıdaki menüden bir klan seç.",
-            "",
-            "⚠️ Her kullanıcı yalnızca **1 oy** verebilir.",
-            "⚠️ Verilen oy daha sonra değiştirilemez."
-          ].join("\n")
-        )
-      ],
-      components: [
-        new ActionRowBuilder()
-          .addComponents(menu)
-      ]
-    });
-
-    setTimeout(
-      () =>
-        finishClanVote(
-          message.guild.id
-        ),
-      duration
-    );
-
-    return;
-  }
-
-  if (content.startsWith("!çekiliş")) {
-    if (!isAdmin(message.member)) {
-      return message.reply(
-        "❌ Bu komutu sadece Yönetici kullanabilir."
-      );
-    }
-
-    const args =
-      message.content
-        .trim()
-        .split(/\s+/);
-
-    const time = args[1];
-    const winnerCount =
-      Number(args[2]);
-
-    const prize =
-      args.slice(3).join(" ");
-
-    const duration =
-      parseTime(time);
+    const duration = parseDuration(args[0]);
+    const winnerCount = Number(args[1]);
+    const prize = args.slice(2).join(" ");
 
     if (
       !duration ||
@@ -3410,921 +745,3302 @@ client.on("messageCreate", async message => {
       winnerCount < 1 ||
       !prize
     ) {
-      return message.reply(
-        "❌ Kullanım: `!çekiliş <süre> <kazanan sayısı> <ödül>`"
-      );
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "🎉 Kullanım Hatalı",
+            "Doğru kullanım:\n`!çekiliş <süre> <kazanan sayısı> <ödül>`\n\nÖrnek:\n`!çekiliş 1h 2 1000 TL`"
+          )
+        ]
+      });
     }
 
-    const id =
-      `${message.guild.id}-${Date.now()}`;
+    if (duration > 7 * 24 * 60 * 60 * 1000) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⚠️ Süre Çok Uzun",
+            "Çekiliş süresi en fazla **7 gün** olabilir."
+          )
+        ]
+      });
+    }
 
-    data.giveaways[id] = {
-      guildId:
-        message.guild.id,
-      channelId:
-        message.channel.id,
+    const giveawayId =
+      `${message.guild.id}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+
+    const endAt = Date.now() + duration;
+
+    guildData.giveaways[giveawayId] = {
+      channelId: message.channel.id,
       messageId: null,
+      hostId: message.author.id,
       prize,
       winnerCount,
-      end:
-        Date.now() + duration,
+      endAt,
       participants: []
     };
 
-    save();
-
-    const row =
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId(
-              `giveaway_join:${id}`
-            )
-            .setLabel("🎉 Katıl")
-            .setStyle(
-              ButtonStyle.Success
-            )
-        );
-
-    const giveawayMessage =
-      await message.channel.send({
-        embeds: [
-          createEmbed(
-            "🎉 ÇEKİLİŞ",
-            [
-              `🎁 **Ödül:** ${prize}`,
-              `🏆 **Kazanan:** ${winnerCount} kişi`,
-              `⏰ **Süre:** ${time}`,
-              "",
-              "Katılmak için aşağıdaki butona bas!",
-              "",
-              `📅 **Bitiş:** <t:${Math.floor(
-                (Date.now() + duration) / 1000
-              )}:R>`
-            ].join("\n")
-          )
-        ],
-        components: [row]
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🎉 YENİ ÇEKİLİŞ")
+      .setDescription(
+        `## 🎁 Ödül\n**${prize}**\n\n` +
+        `👑 **Düzenleyen:** ${message.author}\n` +
+        `🏆 **Kazanan:** ${winnerCount} kişi\n` +
+        `⏰ **Bitiş:** <t:${Math.floor(endAt / 1000)}:R>\n\n` +
+        `Katılmak için aşağıdaki **🎉 Katıl** butonuna bas!`
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Çekiliş Sistemi"
       });
 
-    data.giveaways[id].messageId =
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`giveaway_join:${giveawayId}`)
+        .setLabel("Katıl")
+        .setEmoji("🎉")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    const giveawayMessage = await message.channel.send({
+      embeds: [embed],
+      components: [row]
+    });
+
+    guildData.giveaways[giveawayId].messageId =
       giveawayMessage.id;
 
-    save();
+    saveData();
 
     setTimeout(
-      () =>
-        finishGiveaway(id),
+      () => finishGiveaway(message.guild.id, giveawayId),
       duration
     );
 
     return;
-  }
+        }
+// 3/10
 
-  if (content.startsWith("!drop")) {
-    if (!isAdmin(message.member)) {
-      return message.reply(
-        "❌ Bu komutu sadece Yönetici kullanabilir."
-      );
+  if (command === "drop") {
+    if (!isStaff(message.member)) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⛔ Yetkin Yok",
+            "Drop başlatmak için **Sunucuyu Yönet** yetkisine sahip olmalısın."
+          )
+        ]
+      });
     }
 
-    const prize =
-      message.content
-        .slice("!drop".length)
-        .trim();
+    const prize = args.join(" ");
 
     if (!prize) {
-      return message.reply(
-        "❌ Kullanım: `!drop <ödül>`"
-      );
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⚡ Kullanım Hatalı",
+            "Doğru kullanım:\n`!drop <ödül>`\n\nÖrnek:\n`!drop Nitro`"
+          )
+        ]
+      });
     }
 
-    const id =
-      `${message.guild.id}-${Date.now()}`;
+    const dropId =
+      `${message.guild.id}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
 
-    data.drops[id] = {
-      guildId:
-        message.guild.id,
-      channelId:
-        message.channel.id,
+    guildData.drops[dropId] = {
+      channelId: message.channel.id,
+      messageId: null,
       prize,
-      winner: null
+      hostId: message.author.id,
+      claimed: false,
+      winnerId: null
     };
 
-    save();
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("⚡ DROP BAŞLADI!")
+      .setDescription(
+        `## 🎁 Ödül\n**${prize}**\n\n` +
+        `Bu ödülü kazanmak için aşağıdaki butona **ilk basan kişi** kazanır!\n\n` +
+        `🥇 İlk basan kazanır.\n` +
+        `⚡ Hızlı ol!`
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Drop Sistemi"
+      });
 
-    const row =
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId(
-              `drop_claim:${id}`
-            )
-            .setLabel("🎁 AL!")
-            .setStyle(
-              ButtonStyle.Success
-            )
-        );
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`drop_claim:${dropId}`)
+        .setLabel("ÖDÜLÜ KAP!")
+        .setEmoji("⚡")
+        .setStyle(ButtonStyle.Success)
+    );
 
-    return message.channel.send({
-      embeds: [
-        createEmbed(
-          "🎁 DROP",
-          [
-            `🎁 **Ödül:** ${prize}`,
-            "",
-            "⚡ İlk basan kazanır!",
-            "",
-            "Kazanan kişi ödülünü almak için ticket açabilir."
-          ].join("\n")
-        )
-      ],
+    const dropMessage = await message.channel.send({
+      embeds: [embed],
+      components: [row]
+    });
+
+    guildData.drops[dropId].messageId = dropMessage.id;
+
+    saveData();
+
+    return;
+  }
+
+  if (command === "panel") {
+    if (!isAdmin(message.member)) {
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "⛔ Yönetici Yetkisi Gerekli",
+            "Bu paneli yalnızca **Yönetici** yetkisine sahip kişiler kullanabilir."
+          )
+        ]
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🛠️ LynoxNetwork Yönetim Paneli")
+      .setDescription(
+        "Sunucunun sistemlerini aşağıdaki menüden yönetebilirsin.\n\n" +
+        "🎫 **Ticket Kur** — Ticket kategorisi ve sorumlu rolünü ayarla.\n" +
+        "👥 **Toplu Rol Ver** — Seçilen rolü tüm uygun üyelere verir.\n" +
+        "🗑️ **Toplu Rol Al** — Seçilen rolü üyelerden alır.\n" +
+        "💡 **Öneri Kanalı** — `🆘|öneri` kanalını oluşturur.\n" +
+        "👤 **Rol Ver** — Belirli üyeye rol verir.\n" +
+        "📚 **Komut Bilgi** — Kullanıcının yetkisine göre komutları gösterir.\n" +
+        "🤖 **OtoRol** — Yeni üyelere otomatik rol verir.\n" +
+        "👋 **Hoşgeldin Kanalı** — `🤩|giriş-çıkış` kanalını oluşturur.\n" +
+        "⭐ **Puan Kanalı** — Yalnızca `!puanver` komutuna izin verir.\n" +
+        "🔊 **Ses Oluştur** — Buton ile geçici ses kanalları oluşturur."
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Yönetim Merkezi"
+      });
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("admin_panel")
+      .setPlaceholder("⚙️ Bir işlem seç...")
+      .addOptions(
+        {
+          label: "Ticket Kur",
+          description: "Ticket sistemi ve sorumlu rolünü ayarla.",
+          value: "panel_ticket",
+          emoji: "🎫"
+        },
+        {
+          label: "Toplu Rol Ver",
+          description: "Seçilen rolü üyelere verir.",
+          value: "panel_mass_role_add",
+          emoji: "👥"
+        },
+        {
+          label: "Toplu Rol Al",
+          description: "Seçilen rolü üyelerden alır.",
+          value: "panel_mass_role_remove",
+          emoji: "🗑️"
+        },
+        {
+          label: "Öneri Kanalı Oluştur",
+          description: "🆘|öneri kanalını oluşturur.",
+          value: "panel_suggestion",
+          emoji: "💡"
+        },
+        {
+          label: "Rol Ver",
+          description: "Belirli üyeye belirli rolü verir.",
+          value: "panel_role_give",
+          emoji: "👤"
+        },
+        {
+          label: "Komut Bilgi",
+          description: "Kullanabileceğin komutları gösterir.",
+          value: "panel_commands",
+          emoji: "📚"
+        },
+        {
+          label: "OtoRol",
+          description: "Yeni üyelere otomatik rol ayarla.",
+          value: "panel_autorole",
+          emoji: "🤖"
+        },
+        {
+          label: "Hoşgeldin Kanalı",
+          description: "Giriş/çıkış kanalını oluşturur.",
+          value: "panel_welcome",
+          emoji: "👋"
+        },
+        {
+          label: "Puan Kanalı",
+          description: "Puan verme kanalını oluşturur.",
+          value: "panel_rating",
+          emoji: "⭐"
+        },
+        {
+          label: "Ses Oluştur",
+          description: "Geçici ses kanalı sistemini kurar.",
+          value: "panel_voice",
+          emoji: "🔊"
+        }
+      );
+
+    const row = new ActionRowBuilder().addComponents(menu);
+
+    return message.reply({
+      embeds: [embed],
       components: [row]
     });
   }
-});
 
-async function finishGiveaway(id) {
-  const giveaway =
-    data.giveaways[id];
+  if (command === "klan") {
+    const sub = (args.shift() || "").toLowerCase();
 
-  if (!giveaway) return;
+    if (sub === "add") {
+      if (!isStaff(message.member)) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⛔ Yetkin Yok",
+              "Klan eklemek için **Sunucuyu Yönet** yetkisine sahip olmalısın."
+            )
+          ]
+        });
+      }
 
-  const guild =
-    client.guilds.cache.get(
-      giveaway.guildId
-    );
+      const clanName = args.join(" ").trim();
 
-  if (!guild) return;
+      if (!clanName) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚔️ Klan İsmi Eksik",
+              "Örnek:\n`!klan add Lynox`"
+            )
+          ]
+        });
+      }
 
-  const channel =
-    guild.channels.cache.get(
-      giveaway.channelId
-    );
+      if (clanName.length > 50) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚠️ İsim Çok Uzun",
+              "Klan ismi en fazla **50 karakter** olabilir."
+            )
+          ]
+        });
+      }
 
-  if (!channel) return;
-
-  const participants =
-    [...new Set(
-      giveaway.participants
-    )];
-
-  if (!participants.length) {
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "🎉 ÇEKİLİŞ BİTTİ",
-          [
-            `🎁 **Ödül:** ${giveaway.prize}`,
-            "",
-            "❌ Yeterli katılım olmadığı için kazanan çıkmadı."
-          ].join("\n")
-        )
-      .catch(() => {});
-
-    delete data.giveaways[id];
-    save();
-    return;
-  }
-
-  const shuffled =
-    participants.sort(
-      () => Math.random() - 0.5
-    );
-
-  const winners =
-    shuffled.slice(
-      0,
-      Math.min(
-        giveaway.winnerCount,
-        shuffled.length
-      )
-    );
-
-  const mentions =
-    winners
-      .map(userId => `<@${userId}>`)
-      .join(", ");
-
-  await channel.send({
-    content: mentions,
-    embeds: [
-      createEmbed(
-        "🎉 ÇEKİLİŞ SONUÇLANDI!",
-        [
-          `🎁 **Ödül:** ${giveaway.prize}`,
-          "",
-          `🏆 **Kazananlar:** ${mentions}`,
-          "",
-          "🎫 Ödülünüzü talep etmek için ticket açabilirsiniz."
-        ].join("\n")
-      )
-    ]
-  }).catch(() => {});
-
-  delete data.giveaways[id];
-
-  save();
-}
-
-function parseTime(value) {
-  if (!value) return null;
-
-  const match =
-    value
-      .toLowerCase()
-      .match(
-        /^(\d+)\s*(s|m|h|d|w)$/
+      const exists = guildData.clans.list.some(
+        clan =>
+          clan.name.toLowerCase() ===
+          clanName.toLowerCase()
       );
 
-  if (!match) return null;
+      if (exists) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚠️ Klan Zaten Var",
+              `**${clanName}** zaten oylama listesinde.`
+            )
+          ]
+        });
+      }
 
-  const amount =
-    Number(match[1]);
+      guildData.clans.list.push({
+        name: clanName,
+        addedBy: message.author.id
+      });
 
-  const unit =
-    match[2];
+      saveData();
 
-  const units = {
-    s: 1000,
-    m: 60 * 1000,
-    h: 60 * 60 * 1000,
-    d: 24 * 60 * 60 * 1000,
-    w: 7 * 24 * 60 * 60 * 1000
-  };
+      return message.reply({
+        embeds: [
+          makeEmbed(
+            "✅ Klan Eklendi",
+            `⚔️ **${clanName}** klanı oylama listesine eklendi.`
+          )
+        ]
+      });
+    }
 
-  return amount * units[unit];
+    if (sub === "oylama") {
+      if (!isStaff(message.member)) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⛔ Yetkin Yok",
+              "Klan oylaması başlatmak için **Sunucuyu Yönet** yetkisine sahip olmalısın."
+            )
+          ]
+        });
+      }
+
+      const duration = parseDuration(args[0]);
+      const reward = args.slice(1).join(" ");
+
+      if (!duration || !reward) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚔️ Kullanım Hatalı",
+              "Doğru kullanım:\n`!klan oylama <süre> <ödül>`\n\nÖrnek:\n`!klan oylama 24h 1000 TL`"
+            )
+          ]
+        });
+      }
+
+      if (guildData.clans.list.length === 0) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚠️ Klan Yok",
+              "Önce en az bir klan eklemelisin:\n`!klan add <klan ismi>`"
+            )
+          ]
+        });
+      }
+
+      if (guildData.clans.active) {
+        return message.reply({
+          embeds: [
+            makeEmbed(
+              "⚠️ Aktif Oylama Var",
+              "Önce mevcut klan oylamasının bitmesini bekle."
+            )
+          ]
+        });
+      }
+
+      const clans = guildData.clans.list.map(clan => ({
+        name: clan.name,
+        votes: 0
+      }));
+
+      guildData.clans.active = {
+        id: `${Date.now()}`,
+        endAt: Date.now() + duration,
+        reward,
+        hostId: message.author.id,
+        votes: {},
+        clans
+      };
+
+      saveData();
+
+      const embed = createClanVotingEmbed(
+        guildData.clans.active
+      );
+
+      const row = createClanVotingRow(
+        guildData.clans.active
+      );
+
+      await message.channel.send({
+        embeds: [embed],
+        components: [row]
+      });
+
+      setTimeout(
+        () => finishClanVote(message.guild.id),
+        duration
+      );
+
+      return;
+    }
+
+    return message.reply({
+      embeds: [
+        makeEmbed(
+          "⚔️ Klan Komutları",
+          "`!klan add <klan ismi>` — Klan ekler.\n" +
+          "`!klan oylama <süre> <ödül>` — Klan oylaması başlatır."
+        )
+      ]
+    });
+  }
+
+  if (command === "cash") {
+    return message.reply({
+      embeds: [
+        makeEmbed(
+          "💰 Ekonomi",
+          "Ekonomi sistemi bu sürümde aktif değil."
+        )
+      ]
+    });
+  }
+
+  if (command === "daily") {
+    return message.reply({
+      embeds: [
+        makeEmbed(
+          "💰 Ekonomi",
+          "Ekonomi sistemi bu sürümde aktif değil."
+        )
+      ]
+    });
+  }
+// 4/10
+
+function createClanVotingEmbed(voteData) {
+  const sorted = [...voteData.clans].sort(
+    (a, b) => b.votes - a.votes
+  );
+
+  const medals = ["🥇", "🥈", "🥉"];
+
+  let ranking = "";
+
+  sorted.forEach((clan, index) => {
+    const medal = medals[index] || `**${index + 1}.**`;
+
+    ranking += `${medal} **${clan.name}** — \`${clan.votes} oy\`\n`;
+  });
+
+  if (!ranking) {
+    ranking = "Henüz oy kullanılmadı.";
+  }
+
+  const totalVotes = voteData.clans.reduce(
+    (sum, clan) => sum + clan.votes,
+    0
+  );
+
+  return new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setTitle("⚔️ LynoxNetwork • Klan Oylaması")
+    .setDescription(
+      `Aşağıdaki listeden desteklediğin klanı seç!\n\n` +
+      `🎁 **Kazanan Ödülü:** ${voteData.reward}\n` +
+      `⏰ **Bitiş:** <t:${Math.floor(
+        voteData.endAt / 1000
+      )}:R>\n` +
+      `🗳️ **Toplam Oy:** ${totalVotes}\n\n` +
+      `### 🏆 Güncel Sıralama\n${ranking}\n\n` +
+      `⚠️ Her kullanıcı yalnızca **1 kez** oy verebilir ve verdiği oyu değiştiremez.`
+    )
+    .setTimestamp()
+    .setFooter({
+      text: "LynoxNetwork • Klan Oylama Sistemi"
+    });
 }
 
-function normalizeText(text) {
-  return text
-    .toLowerCase()
-    .replace(/0/g, "o")
-    .replace(/1/g, "i")
-    .replace(/3/g, "e")
-    .replace(/4/g, "a")
-    .replace(/5/g, "s")
-    .replace(/7/g, "t")
-    .replace(/[^a-zğüşıöç]/g, "");
-}
+function createClanVotingRow(voteData) {
+  const options = voteData.clans
+    .slice(0, 25)
+    .map((clan, index) => ({
+      label: clan.name.slice(0, 100),
+      description: `${clan.votes} oy • ${index + 1}. sırada`,
+      value: clan.name
+    }));
 
-const badWords = [
-  "amk",
-  "aq",
-  "orospu",
-  "orospucocu",
-  "siktir",
-  "sik",
-  "yarrak",
-  "yarrag",
-  "piç",
-  "pic",
-  "pezevenk",
-  "göt",
-  "got",
-  "ananı sikeyim",
-  "ananisikim"
-];
-
-function isAdmin(member) {
-  return member?.permissions?.has(
-    PermissionFlagsBits.Administrator
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`clan_vote:${voteData.id}`)
+      .setPlaceholder("⚔️ Desteklediğin klanı seç...")
+      .addOptions(options)
   );
 }
 
-function createEmbed(
-  title,
-  description
-) {
-  return new EmbedBuilder()
-    .setTitle(title)
-    .setDescription(description)
-    .setTimestamp()
-    .setFooter({
-      text: "LynoxNetwork"
-    });
-}
+async function finishClanVote(guildId) {
+  const guildData = getGuildData(guildId);
 
-function getTicketConfig(guildId) {
-  return data.ticketConfig?.[guildId] || null;
-}
+  if (!guildData.clans.active) return;
 
-function getTicketByChannel(channelId) {
-  for (
-    const [id, ticket]
-    of Object.entries(
-      data.tickets || {}
-    )
-  ) {
-    if (
-      ticket.channel === channelId
-    ) {
-      return [id, ticket];
-    }
-  }
+  const voteData = guildData.clans.active;
 
-  return null;
-}
+  if (Date.now() < voteData.endAt) return;
 
-function getClanConfig(guildId) {
-  return data.clanConfig?.[guildId] || null;
-}
+  const guild = client.guilds.cache.get(guildId);
 
-function getClanList(guildId) {
-  return data.clans?.[guildId] || [];
-}
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isStringSelectMenu()) return;
-
-  if (interaction.customId === "ticket_category_select") {
-    const config =
-      data.ticketConfig?.[interaction.guild.id];
-
-    if (!config) {
-      return interaction.reply({
-        content: "❌ Ticket sistemi kurulmamış.",
-        ephemeral: true
-      });
-    }
-
-    const existing =
-      Object.values(data.tickets || {})
-        .find(
-          ticket =>
-            ticket.guildId === interaction.guild.id &&
-            ticket.userId === interaction.user.id &&
-            ticket.closed !== true
-        );
-
-    if (existing) {
-      const oldChannel =
-        interaction.guild.channels.cache.get(
-          existing.channel
-        );
-
-      return interaction.reply({
-        content:
-          oldChannel
-            ? `❌ Zaten açık bir ticketın var: ${oldChannel}`
-            : "❌ Zaten açık bir ticketın var.",
-        ephemeral: true
-      });
-    }
-
-    const selected =
-      interaction.values[0];
-
-    const ticketCategory =
-      config.categories?.[selected];
-
-    if (!ticketCategory) {
-      return interaction.reply({
-        content:
-          "❌ Ticket kategorisi bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    const category =
-      interaction.guild.channels.cache.get(
-        ticketCategory.id || config.category
-      );
-
-    if (
-      !category ||
-      category.type !== ChannelType.GuildCategory
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Ticket kategorisi bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    await interaction.deferReply({
-      ephemeral: true
-    });
-
-    const ticketId =
-      `${interaction.guild.id}-${interaction.user.id}-${Date.now()}`;
-
-    const channel =
-      await interaction.guild.channels.create({
-        name:
-          `ticket-${interaction.user.username}`
-            .toLowerCase()
-            .replace(/[^a-z0-9-]/g, "")
-            .slice(0, 80),
-        type:
-          ChannelType.GuildText,
-        parent:
-          category.id,
-        permissionOverwrites: [
-          {
-            id:
-              interaction.guild.roles.everyone.id,
-            deny: [
-              PermissionFlagsBits.ViewChannel
-            ]
-          },
-          {
-            id:
-              interaction.user.id,
-            allow: [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-              PermissionFlagsBits.AttachFiles
-            ]
-          },
-          {
-            id:
-              config.role,
-            allow: [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-              PermissionFlagsBits.AttachFiles
-            ]
-          }
-        ]
-      })
-      .catch(() => null);
-
-    if (!channel) {
-      return interaction.editReply({
-        content:
-          "❌ Ticket kanalı oluşturulamadı."
-      });
-    }
-
-    data.tickets[ticketId] = {
-      id: ticketId,
-      guildId:
-        interaction.guild.id,
-      channel:
-        channel.id,
-      userId:
-        interaction.user.id,
-      roleId:
-        config.role,
-      category:
-        ticketCategory.name,
-      createdAt:
-        Date.now(),
-      closed: false
-    };
-
-    save();
-
-    const closeButton =
-      new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId(
-              `ticket_close:${ticketId}`
-            )
-            .setLabel("🔒 Ticket Kapat")
-            .setStyle(
-              ButtonStyle.Danger
-            )
-        );
-
-    await channel.send({
-      content:
-        `<@${interaction.user.id}> <@&${config.role}>`,
-      embeds: [
-        createEmbed(
-          `🎫 ${ticketCategory.name}`,
-          [
-            `👤 **Ticket sahibi:** ${interaction.user}`,
-            `🛡️ **Yetkili rolü:** <@&${config.role}>`,
-            "",
-            "Destek ekibimiz kısa süre içerisinde ilgilenecektir.",
-            "",
-            "Ticketı kapatmak için aşağıdaki butonu kullanabilirsin."
-          ].join("\n")
-        )
-      ],
-      components: [
-        closeButton
-      ]
-    });
-
-    return interaction.editReply({
-      content:
-        `✅ Ticket oluşturuldu: ${channel}`
-    });
-  }
-
-  if (
-    interaction.customId.startsWith(
-      "clan_vote:"
-    )
-  ) {
-    const guildId =
-      interaction.customId.split(":")[1];
-
-    if (
-      guildId !== interaction.guild.id
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Geçersiz oylama.",
-        ephemeral: true
-      });
-    }
-
-    const config =
-      data.clanConfig[guildId];
-
-    if (
-      !config ||
-      !config.active ||
-      Date.now() >= config.end
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Klan oylaması sona ermiş.",
-        ephemeral: true
-      });
-    }
-
-    data.clanVotes[guildId] ||= {};
-
-    if (
-      data.clanVotes[guildId][
-        interaction.user.id
-      ]
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Daha önce oy verdin. Oyunu değiştiremezsin.",
-        ephemeral: true
-      });
-    }
-
-    const index =
-      Number(interaction.values[0]);
-
-    const clans =
-      data.clans[guildId] || [];
-
-    const clan =
-      clans[index];
-
-    if (!clan) {
-      return interaction.reply({
-        content:
-          "❌ Klan bulunamadı.",
-        ephemeral: true
-      });
-    }
-
-    clan.votes =
-      Number(clan.votes || 0) + 1;
-
-    data.clanVotes[guildId][
-      interaction.user.id
-    ] = clan.name;
-
-    save();
-
-    return interaction.reply({
-      content:
-        `✅ **${clan.name}** klanına oyun kaydedildi. Oyunu değiştiremezsin.`,
-      ephemeral: true
-    });
-  }
-});
-
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isButton()) return;
-
-  if (
-    interaction.customId.startsWith(
-      "giveaway_join:"
-    )
-  ) {
-    const id =
-      interaction.customId.split(":")[1];
-
-    const giveaway =
-      data.giveaways[id];
-
-    if (!giveaway) {
-      return interaction.reply({
-        content:
-          "❌ Bu çekiliş artık aktif değil.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      Date.now() >= giveaway.end
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Bu çekiliş sona ermiş.",
-        ephemeral: true
-      });
-    }
-
-    if (
-      giveaway.participants.includes(
-        interaction.user.id
-      )
-    ) {
-      return interaction.reply({
-        content:
-          "❌ Zaten çekilişe katıldın.",
-        ephemeral: true
-      });
-    }
-
-    giveaway.participants.push(
-      interaction.user.id
-    );
-
-    save();
-
-    return interaction.reply({
-      content:
-        "🎉 Çekilişe başarıyla katıldın!",
-      ephemeral: true
-    });
-  }
-
-  if (
-    interaction.customId.startsWith(
-      "drop_claim:"
-    )
-  ) {
-    const id =
-      interaction.customId.split(":")[1];
-
-    const drop =
-      data.drops[id];
-
-    if (!drop) {
-      return interaction.reply({
-        content:
-          "❌ Bu drop artık aktif değil.",
-        ephemeral: true
-      });
-    }
-
-    if (drop.winner) {
-      return interaction.reply({
-        content:
-          `❌ Dropu zaten <@${drop.winner}> kazandı.`,
-        ephemeral: true
-      });
-    }
-
-    drop.winner =
-      interaction.user.id;
-
-    save();
-
-    const channel =
-      interaction.channel;
-
-    await interaction.reply({
-      content:
-        `🎉 Tebrikler ${interaction.user}! İlk bastığın için **${drop.prize}** ödülünü kazandın. Ödülünü almak için ticket açabilirsin.`
-    });
-
-    await channel.send({
-      embeds: [
-        createEmbed(
-          "🎁 DROP KAZANANI",
-          [
-            `🏆 **Kazanan:** ${interaction.user}`,
-            `🎁 **Ödül:** ${drop.prize}`,
-            "",
-            "🎫 Ödülünü almak için ticket açabilirsin."
-          ].join("\n")
-        )
-      ]
-    }).catch(() => {});
-
+  if (!guild) {
+    guildData.clans.active = null;
+    saveData();
     return;
   }
 
-  if (
-    interaction.customId.startsWith(
-      "ticket_close:"
-    )
-  ) {
-    const ticketId =
-      interaction.customId.split(":")[1];
+  const sorted = [...voteData.clans].sort(
+    (a, b) => b.votes - a.votes
+  );
 
-    const ticket =
-      data.tickets[ticketId];
+  const winner = sorted[0];
 
-    if (!ticket) {
-      return interaction.reply({
-        content:
-          "❌ Ticket kaydı bulunamadı.",
-        ephemeral: true
+  const channel = guild.channels.cache.find(
+    channel =>
+      channel.type === ChannelType.GuildText &&
+      channel.permissionsFor(guild.members.me)?.has(
+        PermissionsBitField.Flags.SendMessages
+      )
+  );
+
+  if (channel && winner) {
+    const ranking = sorted
+      .map((clan, index) => {
+        const medal =
+          index === 0
+            ? "🥇"
+            : index === 1
+              ? "🥈"
+              : index === 2
+                ? "🥉"
+                : `**${index + 1}.**`;
+
+        return `${medal} **${clan.name}** — \`${clan.votes} oy\``;
+      })
+      .join("\n");
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("🏆 KLAN OYLAMASI SONA ERDİ!")
+      .setDescription(
+        `## 🥇 Kazanan Klan\n` +
+        `# ${winner.name}\n\n` +
+        `🎁 **Ödül:** ${voteData.reward}\n` +
+        `🗳️ **Oy:** ${winner.votes}\n\n` +
+        `### 📊 Final Sıralaması\n${ranking}\n\n` +
+        `Tüm katılımcılara teşekkürler!`
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Klan Oylama Sistemi"
       });
-    }
 
-    const config =
-      data.ticketConfig[
-        interaction.guild.id
-      ];
-
-    const isOwner =
-      interaction.user.id ===
-      ticket.userId;
-
-    const isStaff =
-      config &&
-      interaction.member.roles.cache.has(
-        config.role
-      );
-
-    if (!isOwner && !isStaff) {
-      return interaction.reply({
-        content:
-          "❌ Bu ticketı kapatma yetkin yok.",
-        ephemeral: true
-      });
-    }
-
-    await interaction.deferReply({
-      ephemeral: true
+    await channel.send({
+      embeds: [embed]
     });
+  }
 
-    const channel =
-      interaction.guild.channels.cache.get(
-        ticket.channel
-      );
+  guildData.clans.active = null;
+  saveData();
+}
 
-    if (!channel) {
-      delete data.tickets[ticketId];
-      save();
+async function finishGiveaway(guildId, giveawayId) {
+  const guildData = getGuildData(guildId);
+  const giveaway = guildData.giveaways[giveawayId];
 
-      return interaction.editReply({
-        content:
-          "❌ Ticket kanalı zaten silinmiş."
+  if (!giveaway) return;
+
+  if (Date.now() < giveaway.endAt) return;
+
+  const guild = client.guilds.cache.get(guildId);
+
+  if (!guild) {
+    delete guildData.giveaways[giveawayId];
+    saveData();
+    return;
+  }
+
+  const participants = [
+    ...new Set(giveaway.participants)
+  ];
+
+  if (participants.length === 0) {
+    const channel = guild.channels.cache.get(
+      giveaway.channelId
+    );
+
+    if (channel) {
+      await channel.send({
+        embeds: [
+          makeEmbed(
+            "🎉 Çekiliş Sona Erdi",
+            `**${giveaway.prize}** çekilişine kimse katılmadı.`
+          )
+        ]
       });
     }
 
+    delete guildData.giveaways[giveawayId];
+    saveData();
+    return;
+  }
+
+  const shuffled = [...participants].sort(
+    () => Math.random() - 0.5
+  );
+
+  const winners = shuffled.slice(
+    0,
+    Math.min(giveaway.winnerCount, shuffled.length)
+  );
+
+  const channel = guild.channels.cache.get(
+    giveaway.channelId
+  );
+
+  if (channel) {
+    const mentions = winners
+      .map(id => `<@${id}>`)
+      .join(", ");
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("🏆 ÇEKİLİŞ SONUÇLANDI!")
+      .setDescription(
+        `🎁 **Ödül:** ${giveaway.prize}\n\n` +
+        `🏆 **Kazananlar:**\n${mentions}\n\n` +
+        `🎫 Ödülünüzü almak için **ticket açarak ödülünüzü talep edebilirsiniz.**`
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Çekiliş Sistemi"
+      });
+
+    await channel.send({
+      content: mentions,
+      embeds: [embed]
+    });
+  }
+
+  delete guildData.giveaways[giveawayId];
+  saveData();
+}
+
+async function createTranscript(channel) {
+  try {
     const messages = [];
 
     let lastId;
 
     while (true) {
-      const options = {
-        limit: 100
-      };
+      const fetched = await channel.messages.fetch({
+        limit: 100,
+        ...(lastId ? { before: lastId } : {})
+      });
 
-      if (lastId) {
-        options.before = lastId;
-      }
+      if (fetched.size === 0) break;
 
-      const fetched =
-        await channel.messages
-          .fetch(options)
-          .catch(() => null);
+      messages.push(...fetched.values());
 
-      if (!fetched || !fetched.size)
-        break;
+      lastId = fetched.last().id;
 
-      messages.push(
-        ...fetched.values()
-      );
+      if (fetched.size < 100) break;
 
-      lastId =
-        fetched.last().id;
-
-      if (fetched.size < 100)
-        break;
+      if (messages.length >= 5000) break;
     }
 
     messages.reverse();
 
-    const transcript =
-      messages.map(msg => {
-        const date =
-          new Date(
-            msg.createdTimestamp
-          ).toLocaleString(
-            "tr-TR"
-          );
+    let transcript =
+      `LYNOXNETWORK TICKET TRANSCRIPT\n` +
+      `Kanal: ${channel.name}\n` +
+      `Oluşturulma: ${new Date(
+        channel.createdTimestamp
+      ).toLocaleString("tr-TR")}\n` +
+      `${"=".repeat(70)}\n\n`;
 
-        const attachments =
+    for (const msg of messages) {
+      const time = new Date(
+        msg.createdTimestamp
+      ).toLocaleString("tr-TR");
+
+      let content = msg.content || "";
+
+      if (msg.attachments.size) {
+        content +=
+          " " +
           [...msg.attachments.values()]
-            .map(a => a.url)
+            .map(a => `[Dosya: ${a.url}]`)
             .join(" ");
+      }
 
-        return [
-          `[${date}]`,
-          `${msg.author.tag}:`,
-          msg.content || "",
-          attachments
-        ].join(" ");
-      }).join("\n");
+      if (!content) {
+        content = "[Embed / Buton / İçerik]";
+      }
 
-    const buffer =
-      Buffer.from(
-        transcript ||
-          "Bu ticketta mesaj bulunamadı.",
-        "utf8"
-      );
-
-    const file = {
-      attachment:
-        buffer,
-      name:
-        `transcript-${ticketId}.txt`
-    };
-
-    const owner =
-      await interaction.guild.members
-        .fetch(ticket.userId)
-        .catch(() => null);
-
-    const staffRole =
-      config
-        ? interaction.guild.roles.cache.get(
-            config.role
-          )
-        : null;
-
-    const recipients = [];
-
-    if (owner) {
-      recipients.push(owner);
+      transcript +=
+        `[${time}] ${msg.author.tag}: ${content}\n`;
     }
 
-    if (staffRole) {
-      for (
-        const member
-        of staffRole.members.values()
+    transcript += `\n${"=".repeat(70)}\n`;
+    transcript += `Toplam mesaj: ${messages.length}\n`;
+
+    return Buffer.from(transcript, "utf8");
+  } catch (err) {
+    console.error("Transcript oluşturma hatası:", err);
+
+    return Buffer.from(
+      "Transcript oluşturulurken hata meydana geldi.",
+      "utf8"
+    );
+  }
+}
+
+async function sendTicketTranscript(
+  guild,
+  ticketData,
+  channel
+) {
+  try {
+    const transcript = await createTranscript(channel);
+
+    const owner = await guild.fetchOwner();
+
+    const ticketUser = await client.users
+      .fetch(ticketData.userId)
+      .catch(() => null);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle("🎫 Ticket Kapatıldı")
+      .setDescription(
+        `**LynoxNetwork ticket sistemi tarafından oluşturulan transcript.**`
+      )
+      .addFields(
+        {
+          name: "👤 Ticket Sahibi",
+          value: ticketUser
+            ? `${ticketUser} (${ticketUser.tag})`
+            : ticketData.userId,
+          inline: false
+        },
+        {
+          name: "🛠️ Sorumlu Rol",
+          value: ticketData.staffRoleId
+            ? `<@&${ticketData.staffRoleId}>`
+            : "Belirtilmedi",
+          inline: true
+        },
+        {
+          name: "📂 Ticket Türü",
+          value: ticketData.type || "Genel",
+          inline: true
+        },
+        {
+          name: "🔒 Kapatılan Kanal",
+          value: `#${channel.name}`,
+          inline: true
+        }
+      )
+      .setTimestamp()
+      .setFooter({
+        text: "LynoxNetwork • Ticket Transcript"
+      });
+
+    const payload = {
+      embeds: [embed],
+      files: [
+        {
+          attachment: transcript,
+          name: `${channel.name}-transcript.txt`
+        }
+      ]
+    };
+
+    if (owner) {
+      await owner.send(payload).catch(() => {});
+    }
+
+    if (ticketUser) {
+      await ticketUser.send(payload).catch(() => {});
+    }
+  } catch (err) {
+    console.error(
+      "Ticket transcript gönderme hatası:",
+      err
+    );
+  }
+}
+// 5/10
+
+client.on("interactionCreate", async interaction => {
+  try {
+    if (interaction.isButton()) {
+      const id = interaction.customId;
+
+      // =========================
+      // ÖNERİ OYLAMA
+      // =========================
+
+      if (
+        id === "suggestion_up" ||
+        id === "suggestion_down"
       ) {
+        const message = interaction.message;
+
+        if (!message.embeds[0]) {
+          return interaction.reply({
+            content: "❌ Öneri mesajı bulunamadı.",
+            ephemeral: true
+          });
+        }
+
+        const embed = EmbedBuilder.from(
+          message.embeds[0]
+        );
+
+        const existing =
+          embed.data.fields?.find(
+            field => field.name === "📊 Oylama"
+          );
+
+        let up = 0;
+        let down = 0;
+
+        if (existing) {
+          const match = existing.value.match(
+            /👍\s*(\d+).*👎\s*(\d+)/
+          );
+
+          if (match) {
+            up = Number(match[1]);
+            down = Number(match[2]);
+          }
+        }
+
+        if (id === "suggestion_up") {
+          up++;
+        } else {
+          down++;
+        }
+
+        embed.spliceFields(
+          0,
+          embed.data.fields?.length || 0
+        );
+
+        const originalDescription =
+          embed.data.description || "";
+
+        embed.setDescription(originalDescription);
+
+        embed.addFields({
+          name: "📊 Oylama",
+          value: `👍 ${up}  👎 ${down}`
+        });
+
+        const row =
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("suggestion_up")
+              .setEmoji("👍")
+              .setLabel(String(up))
+              .setStyle(ButtonStyle.Success),
+
+            new ButtonBuilder()
+              .setCustomId("suggestion_down")
+              .setEmoji("👎")
+              .setLabel(String(down))
+              .setStyle(ButtonStyle.Danger)
+          );
+
+        await interaction.update({
+          embeds: [embed],
+          components: [row]
+        });
+
+        return;
+      }
+
+      // =========================
+      // ÇEKİLİŞ KATIL
+      // =========================
+
+      if (id.startsWith("giveaway_join:")) {
+        const giveawayId = id.split(":")[1];
+
+        const guildData = getGuildData(
+          interaction.guild.id
+        );
+
+        const giveaway =
+          guildData.giveaways[giveawayId];
+
+        if (!giveaway) {
+          return interaction.reply({
+            content:
+              "❌ Bu çekiliş artık aktif değil.",
+            ephemeral: true
+          });
+        }
+
+        if (Date.now() >= giveaway.endAt) {
+          return interaction.reply({
+            content:
+              "⏰ Bu çekiliş sona ermiş.",
+            ephemeral: true
+          });
+        }
+
         if (
-          !recipients.some(
-            x => x.id === member.id
+          giveaway.participants.includes(
+            interaction.user.id
           )
         ) {
-          recipients.push(member);
+          return interaction.reply({
+            content:
+              "⚠️ Bu çekilişe zaten katıldın.",
+            ephemeral: true
+          });
+        }
+
+        giveaway.participants.push(
+          interaction.user.id
+        );
+
+        saveData();
+
+        return interaction.reply({
+          content:
+            "🎉 Çekilişe başarıyla katıldın! Bol şans!",
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // DROP
+      // =========================
+
+      if (id.startsWith("drop_claim:")) {
+        const dropId = id.split(":")[1];
+
+        const guildData = getGuildData(
+          interaction.guild.id
+        );
+
+        const drop = guildData.drops[dropId];
+
+        if (!drop) {
+          return interaction.reply({
+            content:
+              "❌ Bu drop artık aktif değil.",
+            ephemeral: true
+          });
+        }
+
+        if (drop.claimed) {
+          return interaction.reply({
+            content:
+              `❌ Bu ödülü zaten <@${drop.winnerId}> kazandı.`,
+            ephemeral: true
+          });
+        }
+
+        drop.claimed = true;
+        drop.winnerId = interaction.user.id;
+
+        saveData();
+
+        const channel =
+          interaction.channel;
+
+        const embed = new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setTitle("⚡ DROP KAZANILDI!")
+          .setDescription(
+            `🎁 **Ödül:** ${drop.prize}\n\n` +
+            `🏆 **Kazanan:** ${interaction.user}\n\n` +
+            `🎫 Ödülünü almak için **ticket açarak ödülünü talep edebilirsin.**`
+          )
+          .setTimestamp()
+          .setFooter({
+            text: "LynoxNetwork • Drop Sistemi"
+          });
+
+        const disabledRow =
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(
+                `drop_claimed:${dropId}`
+              )
+              .setLabel("ÖDÜL KAZANILDI")
+              .setEmoji("🏆")
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true)
+          );
+
+        await interaction.update({
+          content: `${interaction.user}`,
+          embeds: [embed],
+          components: [disabledRow]
+        });
+
+        return;
+      }
+
+      // =========================
+      // TICKET KATEGORİLERİ
+      // =========================
+
+      if (id.startsWith("ticket_")) {
+        const typeMap = {
+          ticket_general: "Genel Destek",
+          ticket_support: "Yetkili Destek",
+          ticket_report: "Şikayet / Bildirim",
+          ticket_other: "Diğer"
+        };
+
+        if (!typeMap[id]) return;
+
+        const guildData = getGuildData(
+          interaction.guild.id
+        );
+
+        if (!guildData.ticket.categoryId) {
+          return interaction.reply({
+            content:
+              "❌ Ticket sistemi henüz kurulmamış.",
+            ephemeral: true
+          });
+        }
+
+        const existingTicket =
+          Object.values(
+            guildData.tickets
+          ).find(
+            ticket =>
+              ticket.userId ===
+                interaction.user.id &&
+              ticket.open === true
+          );
+
+        if (existingTicket) {
+          const existingChannel =
+            interaction.guild.channels.cache.get(
+              existingTicket.channelId
+            );
+
+          return interaction.reply({
+            content: existingChannel
+              ? `⚠️ Zaten açık bir ticketın var: ${existingChannel}`
+              : "⚠️ Zaten açık bir ticketın var.",
+            ephemeral: true
+          });
+        }
+
+        const category =
+          interaction.guild.channels.cache.get(
+            guildData.ticket.categoryId
+          );
+
+        if (
+          !category ||
+          category.type !== ChannelType.GuildCategory
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Ticket kategorisi bulunamadı. Panelden tekrar kur.",
+            ephemeral: true
+          });
+        }
+
+        await interaction.deferReply({
+          ephemeral: true
+        });
+
+        const staffRole =
+          guildData.ticket.staffRoleId
+            ? interaction.guild.roles.cache.get(
+                guildData.ticket.staffRoleId
+              )
+            : null;
+
+        const channelName =
+          `ticket-${sanitizeChannelName(
+            interaction.user.username
+          )}-${Date.now()
+            .toString()
+            .slice(-4)}`;
+
+        const permissionOverwrites = [
+          {
+            id: interaction.guild.id,
+            deny: [
+              PermissionsBitField.Flags.ViewChannel
+            ]
+          },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.AttachFiles,
+              PermissionsBitField.Flags.EmbedLinks
+            ]
+          },
+          {
+            id: interaction.client.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels,
+              PermissionsBitField.Flags.ManageMessages
+            ]
+          }
+        ];
+
+        if (staffRole) {
+          permissionOverwrites.push({
+            id: staffRole.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.AttachFiles,
+              PermissionsBitField.Flags.EmbedLinks
+            ]
+          });
+        }
+
+        const ticketChannel =
+          await interaction.guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: category.id,
+            permissionOverwrites
+          });
+
+        const ticketId =
+          `${interaction.guild.id}-${ticketChannel.id}`;
+
+        guildData.tickets[ticketId] = {
+          channelId: ticketChannel.id,
+          userId: interaction.user.id,
+          staffRoleId:
+            guildData.ticket.staffRoleId,
+          type: typeMap[id],
+          open: true,
+          createdAt: Date.now()
+        };
+
+        saveData();
+
+        const staffMention = staffRole
+          ? `<@&${staffRole.id}>`
+          : "Ticket Yetkilisi";
+
+        const ticketEmbed =
+          new EmbedBuilder()
+            .setColor(0x8b5cf6)
+            .setTitle("🎫 LynoxNetwork Ticket")
+            .setDescription(
+              `Hoş geldin ${interaction.user}!\n\n` +
+              `Talebin başarıyla oluşturuldu. Yetkili ekibimiz en kısa sürede seninle ilgilenecek.\n\n` +
+              `📌 **Ticket Türü:** ${typeMap[id]}\n` +
+              `👤 **Ticket Sahibi:** ${interaction.user}\n` +
+              `🛠️ **Ticket Sorumlusu:** ${staffMention}`
+            )
+            .setTimestamp()
+            .setFooter({
+              text: "LynoxNetwork • Ticket Sistemi"
+            });
+
+        await ticketChannel.send({
+          content:
+            `${interaction.user} ${staffMention}`,
+          embeds: [ticketEmbed],
+          components: [
+            createTicketCloseButton()
+          ]
+        });
+
+        await interaction.editReply({
+          content:
+            `✅ Ticketın oluşturuldu: ${ticketChannel}`
+        });
+
+        return;
+      }
+
+      // =========================
+      // TICKET KAPAT
+      // =========================
+
+      if (id === "ticket_close") {
+        const guildData = getGuildData(
+          interaction.guild.id
+        );
+
+        const ticketEntry =
+          Object.entries(guildData.tickets)
+            .find(
+              ([, ticket]) =>
+                ticket.channelId ===
+                  interaction.channel.id &&
+                ticket.open === true
+            );
+
+        if (!ticketEntry) {
+          return interaction.reply({
+            content:
+              "❌ Bu kanal aktif bir ticket değil.",
+            ephemeral: true
+          });
+        }
+
+        const [ticketId, ticketData] =
+          ticketEntry;
+
+        const canClose =
+          interaction.user.id ===
+            ticketData.userId ||
+          isAdmin(interaction.member) ||
+          (
+            ticketData.staffRoleId &&
+            interaction.member.roles.cache.has(
+              ticketData.staffRoleId
+            )
+          );
+
+        if (!canClose) {
+          return interaction.reply({
+            content:
+              "⛔ Bu ticketı kapatma yetkin yok.",
+            ephemeral: true
+          });
+        }
+
+        await interaction.reply({
+          content:
+            "🔒 Ticket kapatılıyor ve transcript hazırlanıyor..."
+        });
+
+        await sendTicketTranscript(
+          interaction.guild,
+          ticketData,
+          interaction.channel
+        );
+
+        ticketData.open = false;
+        ticketData.closedAt = Date.now();
+
+        saveData();
+
+        await sleep(1500);
+
+        await interaction.channel.delete(
+          "Ticket kapatıldı"
+        );
+
+        return;
+      }
+
+      // =========================
+      // KLAN OYLAMA BUTONLARI
+      // =========================
+
+      if (id.startsWith("clan_vote:")) {
+        const voteId = id.split(":")[1];
+
+        const guildData = getGuildData(
+          interaction.guild.id
+        );
+
+        const voteData =
+          guildData.clans.active;
+
+        if (!voteData || voteData.id !== voteId) {
+          return interaction.reply({
+            content:
+              "❌ Bu klan oylaması artık aktif değil.",
+            ephemeral: true
+          });
+        }
+
+        if (Date.now() >= voteData.endAt) {
+          return interaction.reply({
+            content:
+              "⏰ Bu oylamanın süresi doldu.",
+            ephemeral: true
+          });
+        }
+
+        if (
+          voteData.votes[
+            interaction.user.id
+          ]
+        ) {
+          return interaction.reply({
+            content:
+              "⚠️ Daha önce oy kullandın. Oyun değiştirilemez.",
+            ephemeral: true
+          });
+        }
+
+        const clanName =
+          interaction.values[0];
+
+        const clan =
+          voteData.clans.find(
+            item => item.name === clanName
+          );
+
+        if (!clan) {
+          return interaction.reply({
+            content:
+              "❌ Seçilen klan bulunamadı.",
+            ephemeral: true
+          });
+        }
+
+        clan.votes++;
+
+        voteData.votes[
+          interaction.user.id
+        ] = clanName;
+
+        saveData();
+
+        const embed =
+          createClanVotingEmbed(
+            voteData
+          );
+
+        const row =
+          createClanVotingRow(
+            voteData
+          );
+
+        await interaction.update({
+          embeds: [embed],
+          components: [row]
+        });
+
+        return interaction.followUp({
+          content:
+            `✅ **${clanName}** klanına oyun kaydedildi!`,
+          ephemeral: true
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "Interaction hatası:",
+      err
+    );
+
+    if (!interaction.replied &&
+        !interaction.deferred) {
+      await interaction.reply({
+        content:
+          "❌ İşlem sırasında beklenmeyen bir hata oluştu.",
+        ephemeral: true
+      }).catch(() => {});
+    }
+  }
+});
+// 6/10
+
+client.on("interactionCreate", async interaction => {
+  try {
+
+    // =========================
+    // PANEL MENÜSÜ
+    // =========================
+
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === "admin_panel"
+    ) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content:
+            "⛔ Bu panel yalnızca yöneticiler içindir.",
+          ephemeral: true
+        });
+      }
+
+      const selected =
+        interaction.values[0];
+
+      // =========================
+      // TICKET KUR
+      // =========================
+
+      if (selected === "panel_ticket") {
+        const categoryMenu =
+          new ChannelSelectMenuBuilder()
+            .setCustomId(
+              "setup_ticket_category"
+            )
+            .setPlaceholder(
+              "📂 Ticket kategorisini seç"
+            )
+            .setChannelTypes(
+              ChannelType.GuildCategory
+            );
+
+        const row =
+          new ActionRowBuilder().addComponents(
+            categoryMenu
+          );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "🎫 Ticket Kurulumu",
+              "Öncelikle ticketların açılacağı kategoriyi seç."
+            )
+          ],
+          components: [row],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // TOPLU ROL VER
+      // =========================
+
+      if (
+        selected === "panel_mass_role_add"
+      ) {
+        const roleMenu =
+          new RoleSelectMenuBuilder()
+            .setCustomId(
+              "mass_role_add"
+            )
+            .setPlaceholder(
+              "👥 Verilecek rolü seç"
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "👥 Toplu Rol Ver",
+              "Tüm uygun üyelere verilecek rolü seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              roleMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // TOPLU ROL AL
+      // =========================
+
+      if (
+        selected === "panel_mass_role_remove"
+      ) {
+        const roleMenu =
+          new RoleSelectMenuBuilder()
+            .setCustomId(
+              "mass_role_remove"
+            )
+            .setPlaceholder(
+              "🗑️ Alınacak rolü seç"
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "🗑️ Toplu Rol Al",
+              "Tüm üyelerden kaldırılacak rolü seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              roleMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // ÖNERİ KANALI
+      // =========================
+
+      if (
+        selected === "panel_suggestion"
+      ) {
+        const categoryMenu =
+          new ChannelSelectMenuBuilder()
+            .setCustomId(
+              "setup_suggestion_channel"
+            )
+            .setPlaceholder(
+              "📂 Kategori seç"
+            )
+            .setChannelTypes(
+              ChannelType.GuildCategory
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "💡 Öneri Sistemi",
+              "🆘|öneri kanalının oluşturulacağı kategoriyi seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              categoryMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // ROL VER
+      // =========================
+
+      if (
+        selected === "panel_role_give"
+      ) {
+        const userMenu =
+          new UserSelectMenuBuilder()
+            .setCustomId(
+              "role_give_user"
+            )
+            .setPlaceholder(
+              "👤 Kullanıcı seç"
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "👤 Rol Ver",
+              "Rol verilecek kullanıcıyı seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              userMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // KOMUT BİLGİ
+      // =========================
+
+      if (
+        selected === "panel_commands"
+      ) {
+        const adminCommands =
+          "`!panel`\n" +
+          "`!ticket`\n" +
+          "`!çekiliş`\n" +
+          "`!drop`\n" +
+          "`!klan add`\n" +
+          "`!klan oylama`\n" +
+          "`!puanver`\n" +
+          "`!serverinfo`\n" +
+          "`!avatar`\n" +
+          "`!ip`";
+
+        const userCommands =
+          "`!avatar`\n" +
+          "`!ip`\n" +
+          "`!puanver`\n" +
+          "`!öneri`\n" +
+          "`!serverinfo`";
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "📚 Kullanılabilir Komutlar",
+              isAdmin(
+                interaction.member
+              )
+                ? adminCommands
+                : userCommands
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // OTOROL
+      // =========================
+
+      if (
+        selected === "panel_autorole"
+      ) {
+        const roleMenu =
+          new RoleSelectMenuBuilder()
+            .setCustomId(
+              "setup_autorole"
+            )
+            .setPlaceholder(
+              "🤖 OtoRol seç"
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "🤖 OtoRol Sistemi",
+              "Sunucuya katılanlara verilecek rolü seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              roleMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // HOŞGELDİN KANALI
+      // =========================
+
+      if (
+        selected === "panel_welcome"
+      ) {
+        const categoryMenu =
+          new ChannelSelectMenuBuilder()
+            .setCustomId(
+              "setup_welcome_channel"
+            )
+            .setPlaceholder(
+              "📂 Kategori seç"
+            )
+            .setChannelTypes(
+              ChannelType.GuildCategory
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "👋 Hoşgeldin Sistemi",
+              "🤩|giriş-çıkış kanalının oluşturulacağı kategoriyi seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              categoryMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // PUAN KANALI
+      // =========================
+
+      if (
+        selected === "panel_rating"
+      ) {
+        const categoryMenu =
+          new ChannelSelectMenuBuilder()
+            .setCustomId(
+              "setup_rating_channel"
+            )
+            .setPlaceholder(
+              "📂 Kategori seç"
+            )
+            .setChannelTypes(
+              ChannelType.GuildCategory
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "⭐ Puan Sistemi",
+              "Puan kanalının oluşturulacağı kategoriyi seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              categoryMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // SES OLUŞTUR
+      // =========================
+
+      if (
+        selected === "panel_voice"
+      ) {
+        const channelMenu =
+          new ChannelSelectMenuBuilder()
+            .setCustomId(
+              "setup_voice_creator"
+            )
+            .setPlaceholder(
+              "🔊 Kanal seç"
+            )
+            .setChannelTypes(
+              ChannelType.GuildText
+            );
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              "🔊 Ses Kanalı Sistemi",
+              "Butonun gönderileceği metin kanalını seç."
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              channelMenu
+            )
+          ],
+          ephemeral: true
+        });
+      }
+    }
+
+  } catch (err) {
+    console.error(
+      "Panel menüsü hatası:",
+      err
+    );
+  }
+});
+// 7/10
+
+    // =========================
+    // KANAL SEÇİMLERİ
+    // =========================
+
+    if (
+      interaction.isChannelSelectMenu()
+    ) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content: "⛔ Bu işlem için Yönetici yetkisi gerekli.",
+          ephemeral: true
+        });
+      }
+
+      const selectedChannel =
+        interaction.channels.first();
+
+      if (!selectedChannel) {
+        return interaction.reply({
+          content: "❌ Kanal seçilemedi.",
+          ephemeral: true
+        });
+      }
+
+      // =========================
+      // TICKET KATEGORİSİ
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_ticket_category"
+      ) {
+        const roleMenu =
+          new RoleSelectMenuBuilder()
+            .setCustomId(
+              "setup_ticket_staff_role"
+            )
+            .setPlaceholder(
+              "🛠️ Ticket sorumlusu rolünü seç"
+            );
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "🎫 Ticket • 2/2",
+              `📂 **Kategori:** ${selectedChannel}\n\nŞimdi ticketlardan sorumlu olacak rolü seç.`
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              roleMenu
+            )
+          ]
+        });
+      }
+
+      // =========================
+      // ÖNERİ KATEGORİSİ
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_suggestion_channel"
+      ) {
+        let channel;
+
+        try {
+          channel =
+            await interaction.guild.channels.create({
+              name: "🆘|öneri",
+              type: ChannelType.GuildText,
+              parent: selectedChannel.id,
+              topic:
+                "LynoxNetwork öneri kanalı • !öneri <öneriniz>"
+            });
+        } catch (err) {
+          console.error(
+            "Öneri kanalı oluşturma hatası:",
+            err
+          );
+
+          return interaction.update({
+            embeds: [
+              makeEmbed(
+                "❌ Hata",
+                "Öneri kanalı oluşturulamadı. Botun **Kanal Yönet** yetkisini kontrol et."
+              )
+            ],
+            components: []
+          });
+        }
+
+        const guildData =
+          getGuildData(
+            interaction.guild.id
+          );
+
+        guildData.suggestion.channelId =
+          channel.id;
+
+        saveData();
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "💡 Öneri Sistemi Aktif",
+              `Öneri kanalı başarıyla oluşturuldu: ${channel}\n\nKullanıcılar burada:\n\`!öneri <öneriniz>\`\nşeklinde öneri gönderebilir.`
+            )
+          ],
+          components: []
+        });
+      }
+
+      // =========================
+      // HOŞGELDİN KATEGORİSİ
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_welcome_channel"
+      ) {
+        let channel;
+
+        try {
+          channel =
+            await interaction.guild.channels.create({
+              name: "🤩|giriş-çıkış",
+              type: ChannelType.GuildText,
+              parent: selectedChannel.id,
+              topic:
+                "LynoxNetwork giriş-çıkış sistemi"
+            });
+        } catch (err) {
+          console.error(
+            "Hoşgeldin kanalı oluşturma hatası:",
+            err
+          );
+
+          return interaction.update({
+            embeds: [
+              makeEmbed(
+                "❌ Hata",
+                "Giriş-çıkış kanalı oluşturulamadı."
+              )
+            ],
+            components: []
+          });
+        }
+
+        const guildData =
+          getGuildData(
+            interaction.guild.id
+          );
+
+        guildData.welcome.channelId =
+          channel.id;
+
+        saveData();
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "👋 Hoşgeldin Sistemi Aktif",
+              `Giriş-çıkış kanalı oluşturuldu: ${channel}\n\nYeni üyeler burada modern bir karşılama mesajıyla karşılanacak.`
+            )
+          ],
+          components: []
+        });
+      }
+
+      // =========================
+      // PUAN KATEGORİSİ
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_rating_channel"
+      ) {
+        let channel;
+
+        try {
+          channel =
+            await interaction.guild.channels.create({
+              name: "⭐|sunucu-puanı",
+              type: ChannelType.GuildText,
+              parent: selectedChannel.id,
+              topic:
+                "LynoxNetwork • Sunucu puanlama kanalı • !puanver <1-5>"
+            });
+        } catch (err) {
+          console.error(
+            "Puan kanalı oluşturma hatası:",
+            err
+          );
+
+          return interaction.update({
+            embeds: [
+              makeEmbed(
+                "❌ Hata",
+                "Puan kanalı oluşturulamadı."
+              )
+            ],
+            components: []
+          });
+        }
+
+        const guildData =
+          getGuildData(
+            interaction.guild.id
+          );
+
+        guildData.rating.channelId =
+          channel.id;
+
+        saveData();
+
+        const embed =
+          new EmbedBuilder()
+            .setColor(0xf59e0b)
+            .setTitle(
+              "⭐ LynoxNetwork • Sunucu Puanı"
+            )
+            .setDescription(
+              "Sunucumuzu değerlendirmek için aşağıdaki komutu kullanabilirsin.\n\n" +
+              "⭐ **1 — Çok kötü**\n" +
+              "⭐⭐ **2 — Kötü**\n" +
+              "⭐⭐⭐ **3 — Orta**\n" +
+              "⭐⭐⭐⭐ **4 — İyi**\n" +
+              "⭐⭐⭐⭐⭐ **5 — Mükemmel**\n\n" +
+              "### 📝 Kullanım\n" +
+              "`!puanver <1-5>`\n\n" +
+              "⚠️ Her kullanıcı yalnızca **1 kez** puan verebilir."
+            )
+            .setTimestamp()
+            .setFooter({
+              text:
+                "LynoxNetwork • Puan Sistemi"
+            });
+
+        await channel.send({
+          embeds: [embed]
+        });
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "⭐ Puan Sistemi Aktif",
+              `Puan kanalı başarıyla oluşturuldu: ${channel}`
+            )
+          ],
+          components: []
+        });
+      }
+
+      // =========================
+      // SES OLUŞTUR KANALI
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_voice_creator"
+      ) {
+        const guildData =
+          getGuildData(
+            interaction.guild.id
+          );
+
+        guildData.voice.creatorChannelId =
+          selectedChannel.id;
+
+        saveData();
+
+        const embed =
+          new EmbedBuilder()
+            .setColor(0x8b5cf6)
+            .setTitle(
+              "🔊 LynoxNetwork • Ses Kanalları"
+            )
+            .setDescription(
+              "Aşağıdaki butona basarak kendine özel geçici bir ses kanalı oluşturabilirsin.\n\n" +
+              "🎙️ Kanal sana ait olur.\n" +
+              "🔒 Başka kullanıcıların erişimini yönetebilirsin.\n" +
+              "🗑️ Kanal boş kaldığında otomatik silinir."
+            )
+            .setTimestamp()
+            .setFooter({
+              text:
+                "LynoxNetwork • Ses Sistemi"
+            });
+
+        const row =
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(
+                "create_temp_voice"
+              )
+              .setLabel(
+                "Ses Kanalı Oluştur"
+              )
+              .setEmoji("🔊")
+              .setStyle(
+                ButtonStyle.Primary
+              )
+          );
+
+        await selectedChannel.send({
+          embeds: [embed],
+          components: [row]
+        });
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "🔊 Ses Sistemi Aktif",
+              `Ses oluşturma paneli ${selectedChannel} kanalına gönderildi.`
+            )
+          ],
+          components: []
+        });
+      }
+    }
+
+    // =========================
+    // ROL SEÇİMLERİ
+    // =========================
+
+    if (
+      interaction.isRoleSelectMenu()
+    ) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content:
+            "⛔ Bu işlem için Yönetici yetkisi gerekli.",
+          ephemeral: true
+        });
+      }
+
+      const role =
+        interaction.roles.first();
+
+      if (!role) {
+        return interaction.reply({
+          content:
+            "❌ Rol seçilemedi.",
+          ephemeral: true
+        });
+      }
+
+      const guildData =
+        getGuildData(
+          interaction.guild.id
+        );
+
+      // =========================
+      // TICKET SORUMLUSU
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_ticket_staff_role"
+      ) {
+        if (
+          role.managed ||
+          role.id ===
+            interaction.guild.id
+        ) {
+          return interaction.update({
+            embeds: [
+              makeEmbed(
+                "❌ Geçersiz Rol",
+                "Bot tarafından yönetilen veya @everyone rolünü ticket sorumlusu yapamazsın."
+              )
+            ],
+            components: []
+          });
+        }
+
+        guildData.ticket.staffRoleId =
+          role.id;
+
+        saveData();
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "🎫 Ticket Sistemi Hazır",
+              `📂 **Kategori:** <#${guildData.ticket.categoryId}>\n` +
+              `🛠️ **Sorumlu Rol:** ${role}\n\n` +
+              "Artık `!ticket` komutuyla ticket panelini gönderebilirsin."
+            )
+          ],
+          components: []
+        });
+      }
+
+      // =========================
+      // TOPLU ROL VER
+      // =========================
+
+      if (
+        interaction.customId ===
+        "mass_role_add"
+      ) {
+        if (
+          role.position >=
+          interaction.guild.members.me.roles.highest.position
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Bot bu rolden daha düşük seviyede. Bu rolü veremez.",
+            ephemeral: true
+          });
+        }
+
+        await interaction.deferReply({
+          ephemeral: true
+        });
+
+        let success = 0;
+        let failed = 0;
+
+        const members =
+          await interaction.guild.members.fetch();
+
+        for (const member of members.values()) {
+          if (member.user.bot) continue;
+
+          try {
+            if (!member.roles.cache.has(role.id)) {
+              await member.roles.add(role);
+              success++;
+            }
+          } catch {
+            failed++;
+          }
+        }
+
+        return interaction.editReply({
+          embeds: [
+            makeEmbed(
+              "👥 Toplu Rol Verildi",
+              `**Rol:** ${role}\n\n` +
+              `✅ Başarılı: **${success}**\n` +
+              `❌ Başarısız: **${failed}**`
+            )
+          ]
+        });
+      }
+
+      // =========================
+      // TOPLU ROL AL
+      // =========================
+
+      if (
+        interaction.customId ===
+        "mass_role_remove"
+      ) {
+        if (
+          role.position >=
+          interaction.guild.members.me.roles.highest.position
+        ) {
+          return interaction.reply({
+            content:
+              "❌ Bot bu rolü yönetemiyor.",
+            ephemeral: true
+          });
+        }
+
+        await interaction.deferReply({
+          ephemeral: true
+        });
+
+        let success = 0;
+        let failed = 0;
+
+        const members =
+          await interaction.guild.members.fetch();
+
+        for (const member of members.values()) {
+          if (member.user.bot) continue;
+
+          try {
+            if (member.roles.cache.has(role.id)) {
+              await member.roles.remove(role);
+              success++;
+            }
+          } catch {
+            failed++;
+          }
+        }
+
+        return interaction.editReply({
+          embeds: [
+            makeEmbed(
+              "🗑️ Toplu Rol Alındı",
+              `**Rol:** ${role}\n\n` +
+              `✅ Başarılı: **${success}**\n` +
+              `❌ Başarısız: **${failed}**`
+            )
+          ]
+        });
+      }
+
+      // =========================
+      // OTOROL
+      // =========================
+
+      if (
+        interaction.customId ===
+        "setup_autorole"
+      ) {
+        if (
+          role.position >=
+          interaction.guild.members.me.roles.highest.position
+        ) {
+          return interaction.update({
+            embeds: [
+              makeEmbed(
+                "❌ Geçersiz Rol",
+                "Botun rolü seçilen rolden yukarıda olmalı."
+              )
+            ],
+            components: []
+          });
+        }
+
+        guildData.autorole.roleId =
+          role.id;
+
+        saveData();
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "🤖 OtoRol Aktif",
+              `Sunucuya yeni üye katıldığında ${role} otomatik olarak verilecek.`
+            )
+          ],
+          components: []
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "Panel seçim hatası:",
+      err
+    );
+
+    if (
+      interaction.isRepliable() &&
+      !interaction.replied &&
+      !interaction.deferred
+    ) {
+      await interaction.reply({
+        content:
+          "❌ İşlem sırasında bir hata oluştu.",
+        ephemeral: true
+      }).catch(() => {});
+    }
+  }
+// 8/10
+
+    // =========================
+    // KULLANICI SEÇİMİ
+    // =========================
+
+    if (interaction.isUserSelectMenu()) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content:
+            "⛔ Bu işlem için Yönetici yetkisi gerekli.",
+          ephemeral: true
+        });
+      }
+
+      const user = interaction.users.first();
+
+      if (!user) {
+        return interaction.reply({
+          content: "❌ Kullanıcı seçilemedi.",
+          ephemeral: true
+        });
+      }
+
+      // ROL VER → KULLANICI SEÇİLDİ
+      if (
+        interaction.customId ===
+        "role_give_user"
+      ) {
+        const roleMenu =
+          new RoleSelectMenuBuilder()
+            .setCustomId(
+              `role_give_role:${user.id}`
+            )
+            .setPlaceholder(
+              "🎭 Verilecek rolü seç"
+            );
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "👤 Rol Ver • 2/2",
+              `👤 **Kullanıcı:** ${user}\n\nŞimdi bu kullanıcıya verilecek rolü seç.`
+            )
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              roleMenu
+            )
+          ]
+        });
+      }
+    }
+
+    // =========================
+    // ROL VER → ROL SEÇİLDİ
+    // =========================
+
+    if (
+      interaction.isRoleSelectMenu() &&
+      interaction.customId.startsWith(
+        "role_give_role:"
+      )
+    ) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content:
+            "⛔ Bu işlem için Yönetici yetkisi gerekli.",
+          ephemeral: true
+        });
+      }
+
+      const userId =
+        interaction.customId.split(":")[1];
+
+      const role =
+        interaction.roles.first();
+
+      const member =
+        await interaction.guild.members
+          .fetch(userId)
+          .catch(() => null);
+
+      if (!member) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Kullanıcı Bulunamadı",
+              "Seçilen kullanıcı sunucuda bulunamadı."
+            )
+          ],
+          components: []
+        });
+      }
+
+      if (!role) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Rol Bulunamadı",
+              "Seçilen rol bulunamadı."
+            )
+          ],
+          components: []
+        });
+      }
+
+      if (role.managed) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Bu Rol Kullanılamaz",
+              "Discord tarafından yönetilen roller verilemez."
+            )
+          ],
+          components: []
+        });
+      }
+
+      const botMember =
+        interaction.guild.members.me;
+
+      if (
+        !botMember ||
+        role.position >=
+          botMember.roles.highest.position
+      ) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Rol Yetkisi Yetersiz",
+              "Botun rolü, vermeye çalıştığın rolden daha yukarıda olmalı."
+            )
+          ],
+          components: []
+        });
+      }
+
+      if (
+        member.roles.cache.has(role.id)
+      ) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "⚠️ Rol Zaten Var",
+              `${member} kullanıcısında ${role} rolü zaten bulunuyor.`
+            )
+          ],
+          components: []
+        });
+      }
+
+      try {
+        await member.roles.add(
+          role,
+          `LynoxNetwork panel • ${interaction.user.tag}`
+        );
+      } catch (err) {
+        console.error(
+          "Rol verme hatası:",
+          err
+        );
+
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Rol Verilemedi",
+              "Discord rolü vermeyi reddetti. Botun yetkilerini ve rol sırasını kontrol et."
+            )
+          ],
+          components: []
+        });
+      }
+
+      return interaction.update({
+        embeds: [
+          makeEmbed(
+            "✅ Rol Başarıyla Verildi",
+            `👤 **Kullanıcı:** ${member}\n🎭 **Rol:** ${role}\n\nİşlem başarıyla tamamlandı.`
+          )
+        ],
+        components: []
+      });
+    }
+
+    // =========================
+    // TICKET KATEGORİSİ + ROL
+    // =========================
+
+    if (
+      interaction.isRoleSelectMenu() &&
+      interaction.customId ===
+        "setup_ticket_staff_role"
+    ) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content:
+            "⛔ Bu işlem için Yönetici yetkisi gerekli.",
+          ephemeral: true
+        });
+      }
+
+      const role =
+        interaction.roles.first();
+
+      if (!role) {
+        return interaction.reply({
+          content:
+            "❌ Rol seçilemedi.",
+          ephemeral: true
+        });
+      }
+
+      if (role.managed) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Geçersiz Rol",
+              "Bot/entegrasyon tarafından yönetilen bir rol ticket sorumlusu olamaz."
+            )
+          ],
+          components: []
+        });
+      }
+
+      const guildData =
+        getGuildData(
+          interaction.guild.id
+        );
+
+      if (!guildData.ticket.categoryId) {
+        return interaction.update({
+          embeds: [
+            makeEmbed(
+              "❌ Kategori Eksik",
+              "Ticket kategorisi bulunamadı. Panelden ticket sistemini yeniden kur."
+            )
+          ],
+          components: []
+        });
+      }
+
+      guildData.ticket.staffRoleId =
+        role.id;
+
+      saveData();
+
+      return interaction.update({
+        embeds: [
+          makeEmbed(
+            "🎫 Ticket Sistemi Hazır",
+            `📂 **Ticket Kategorisi:** <#${guildData.ticket.categoryId}>\n` +
+            `🛠️ **Ticket Sorumlusu:** ${role}\n\n` +
+            "`!ticket` komutunu kullanarak ticket panelini gönderebilirsin.\n\n" +
+            "Ticket açıldığında ticket sahibi ve sorumlu rol otomatik olarak etiketlenecek."
+          )
+        ],
+        components: []
+      });
+    }
+
+    // =========================
+    // SES KANALI OLUŞTUR
+    // =========================
+
+    if (
+      interaction.isButton() &&
+      interaction.customId ===
+        "create_temp_voice"
+    ) {
+      const guild =
+        interaction.guild;
+
+      const guildData =
+        getGuildData(guild.id);
+
+      const creatorId =
+        guildData.voice.creatorChannelId;
+
+      if (!creatorId) {
+        return interaction.reply({
+          content:
+            "❌ Ses oluşturma sistemi kurulu değil.",
+          ephemeral: true
+        });
+      }
+
+      const creatorChannel =
+        guild.channels.cache.get(
+          creatorId
+        );
+
+      if (!creatorChannel) {
+        return interaction.reply({
+          content:
+            "❌ Ses oluşturma kanalı bulunamadı. Panelden sistemi yeniden kur.",
+          ephemeral: true
+        });
+      }
+
+      const existingVoice =
+        guild.channels.cache.find(
+          channel =>
+            channel.type ===
+              ChannelType.GuildVoice &&
+            channel.parentId ===
+              creatorChannel.parentId &&
+            channel.topic ===
+              `temp-owner:${interaction.user.id}`
+        );
+
+      if (existingVoice) {
+        return interaction.reply({
+          content:
+            `🔊 Zaten oluşturduğun bir ses kanalın var: ${existingVoice}`,
+          ephemeral: true
+        });
+      }
+
+      await interaction.deferReply({
+        ephemeral: true
+      });
+
+      let voiceChannel;
+
+      try {
+        voiceChannel =
+          await guild.channels.create({
+            name:
+              `🔊 ${interaction.user.username}`,
+            type: ChannelType.GuildVoice,
+            parent:
+              creatorChannel.parentId || null,
+            topic:
+              `temp-owner:${interaction.user.id}`,
+            permissionOverwrites: [
+              {
+                id: guild.id,
+                allow: [
+                  PermissionsBitField.Flags.Connect,
+                  PermissionsBitField.Flags.ViewChannel
+                ]
+              },
+              {
+                id: interaction.user.id,
+                allow: [
+                  PermissionsBitField.Flags.Connect,
+                  PermissionsBitField.Flags.ViewChannel,
+                  PermissionsBitField.Flags.Speak,
+                  PermissionsBitField.Flags.Stream,
+                  PermissionsBitField.Flags.MoveMembers,
+                  PermissionsBitField.Flags.MuteMembers,
+                  PermissionsBitField.Flags.DeafenMembers
+                ]
+              }
+            ]
+          });
+      } catch (err) {
+        console.error(
+          "Geçici ses kanalı oluşturma hatası:",
+          err
+        );
+
+        return interaction.editReply({
+          content:
+            "❌ Ses kanalı oluşturulamadı. Botun **Kanalları Yönet** yetkisini kontrol et."
+        });
+      }
+
+      guildData.voice.tempChannels[
+        voiceChannel.id
+      ] = {
+        ownerId:
+          interaction.user.id,
+        createdAt: Date.now()
+      };
+
+      saveData();
+
+      await interaction.editReply({
+        content:
+          `✅ Ses kanalın oluşturuldu: ${voiceChannel}`
+      });
+
+      try {
+        await interaction.member.voice.setChannel(
+          voiceChannel
+        );
+      } catch {}
+
+      return;
+    }
+
+    // =========================
+    // PANELDEN SES KANALI
+    // BOŞ KALINCA OTOMATİK SİL
+    // =========================
+
+    if (
+      interaction.isButton() &&
+      interaction.customId ===
+        "voice_refresh"
+    ) {
+      const guildData =
+        getGuildData(
+          interaction.guild.id
+        );
+
+      const tempChannels =
+        guildData.voice.tempChannels;
+
+      let removed = 0;
+
+      for (
+        const channelId of Object.keys(
+          tempChannels
+        )
+      ) {
+        const channel =
+          interaction.guild.channels.cache.get(
+            channelId
+          );
+
+        if (!channel) {
+          delete tempChannels[
+            channelId
+          ];
+          continue;
+        }
+
+        if (
+          channel.type ===
+            ChannelType.GuildVoice &&
+          channel.members.size === 0
+        ) {
+          await channel.delete().catch(
+            () => {}
+          );
+
+          delete tempChannels[
+            channelId
+          ];
+
+          removed++;
+        }
+      }
+
+      saveData();
+
+      return interaction.reply({
+        content:
+          `🧹 ${removed} boş geçici ses kanalı temizlendi.`,
+        ephemeral: true
+      });
+    }// 9/10
+
+// =========================
+// ÜYE GİRİŞİ
+// =========================
+
+client.on("guildMemberAdd", async member => {
+  try {
+    const guildData =
+      getGuildData(member.guild.id);
+
+    // =========================
+    // OTOROL
+    // =========================
+
+    if (guildData.autorole?.roleId) {
+      const role =
+        member.guild.roles.cache.get(
+          guildData.autorole.roleId
+        );
+
+      if (
+        role &&
+        !role.managed &&
+        role.position <
+          member.guild.members.me.roles.highest.position
+      ) {
+        await member.roles.add(
+          role,
+          "LynoxNetwork • OtoRol"
+        ).catch(err =>
+          console.error(
+            "OtoRol hatası:",
+            err
+          )
+        );
+      }
+    }
+
+    // =========================
+    // HOŞGELDİN MESAJI
+    // =========================
+
+    if (!guildData.welcome?.channelId) {
+      return;
+      }
+
+    const channel =
+      member.guild.channels.cache.get(
+        guildData.welcome.channelId
+      );
+
+    if (
+      !channel ||
+      channel.type !== ChannelType.GuildText
+    ) {
+      return;
+    }
+
+    const accountAge =
+      Date.now() -
+      member.user.createdTimestamp;
+
+    const day =
+      24 * 60 * 60 * 1000;
+
+    const accountDays =
+      Math.floor(accountAge / day);
+
+    let reliability;
+    let reliabilityEmoji;
+
+    // 0 - 2 ay
+    if (accountDays < 60) {
+      reliability =
+        "⚠️ Güvenilir değil";
+      reliabilityEmoji = "⚠️";
+    }
+
+    // 2 - 5 ay
+    else if (accountDays < 150) {
+      reliability =
+        "🟡 Stabil";
+      reliabilityEmoji = "🟡";
+    }
+
+    // 5 ay - 1 yıl
+    else if (accountDays < 365) {
+      reliability =
+        "🟢 Güvenilir";
+      reliabilityEmoji = "🟢";
+    }
+
+    // 1 yıldan eski
+    else if (accountDays < 730) {
+      reliability =
+        "💚 Çok güvenilir";
+      reliabilityEmoji = "💚";
+    }
+
+    // 2 yıldan eski
+    else {
+      reliability =
+        "💯 %100 Güvenilir";
+      reliabilityEmoji = "💯";
+    }
+
+    const embed =
+      new EmbedBuilder()
+        .setColor(0x8b5cf6)
+        .setTitle(
+          `🤩 LynoxNetwork'e Hoş Geldin!`
+        )
+        .setDescription(
+          `Sunucumuza hoş geldin ${member}! 🎉\n\n` +
+          `LynoxNetwork ailesine **${member.guild.memberCount}. üye** olarak katıldın.`
+        )
+        .setThumbnail(
+          member.user.displayAvatarURL({
+            size: 512
+          })
+        )
+        .addFields(
+          {
+            name: "👤 Üye",
+            value:
+              `${member}\n\`${member.user.tag}\``,
+            inline: true
+          },
+          {
+            name: "📥 Giriş Tarihi",
+            value:
+              `<t:${Math.floor(
+                Date.now() / 1000
+              )}:F>`,
+            inline: true
+          },
+          {
+            name: "📅 Hesap Tarihi",
+            value:
+              `<t:${Math.floor(
+                member.user.createdTimestamp /
+                  1000
+              )}:F>\n` +
+              `<t:${Math.floor(
+                member.user.createdTimestamp /
+                  1000
+              )}:R>`,
+            inline: false
+          },
+          {
+            name:
+              `${reliabilityEmoji} Güvenilirlik`,
+            value: reliability,
+            inline: true
+          },
+          {
+            name: "🆔 Kullanıcı ID",
+            value:
+              `\`${member.id}\``,
+            inline: true
+          }
+        )
+        .setTimestamp()
+        .setFooter({
+          text:
+            "LynoxNetwork • Giriş Sistemi"
+        });
+
+    await channel.send({
+      content:
+        `🎉 ${member} sunucuya katıldı!`,
+      embeds: [embed]
+    });
+
+  } catch (err) {
+    console.error(
+      "guildMemberAdd hatası:",
+      err
+    );
+  }
+});
+
+
+// =========================
+// ÜYE ÇIKIŞI
+// =========================
+
+client.on("guildMemberRemove", async member => {
+  try {
+    const guildData =
+      getGuildData(member.guild.id);
+
+    if (!guildData.welcome?.channelId) {
+      return;
+    }
+
+    const channel =
+      member.guild.channels.cache.get(
+        guildData.welcome.channelId
+      );
+
+    if (
+      !channel ||
+      channel.type !== ChannelType.GuildText
+    ) {
+      return;
+    }
+
+    const embed =
+      new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle(
+          "👋 LynoxNetwork • Üye Ayrıldı"
+        )
+        .setDescription(
+          `${member.user.tag} sunucudan ayrıldı.`
+        )
+        .setThumbnail(
+          member.user.displayAvatarURL({
+            size: 512
+          })
+        )
+        .addFields(
+          {
+            name: "👤 Üye",
+            value:
+              `${member.user.tag}\n\`${member.id}\``,
+            inline: true
+          },
+          {
+            name: "📤 Ayrılma Tarihi",
+            value:
+              `<t:${Math.floor(
+                Date.now() / 1000
+              )}:F>`,
+            inline: true
+          }
+        )
+        .setTimestamp()
+        .setFooter({
+          text:
+            "LynoxNetwork • Giriş-Çıkış Sistemi"
+        });
+
+    await channel.send({
+      embeds: [embed]
+    });
+
+  } catch (err) {
+    console.error(
+      "guildMemberRemove hatası:",
+      err
+    );
+  }
+});
+
+
+// =========================
+// GEÇİCİ SES KANALLARINI
+// OTOMATİK TEMİZLEME
+// =========================
+
+setInterval(async () => {
+  try {
+    for (const guild of client.guilds.cache.values()) {
+      const guildData =
+        getGuildData(guild.id);
+
+      if (
+        !guildData.voice ||
+        !guildData.voice.tempChannels
+      ) {
+        continue;
+      }
+
+      let changed = false;
+
+      for (
+        const channelId of Object.keys(
+          guildData.voice.tempChannels
+        )
+      ) {
+        const channel =
+          guild.channels.cache.get(
+            channelId
+          );
+
+        // Kanal Discord'dan silinmiş
+        if (!channel) {
+          delete guildData.voice
+            .tempChannels[channelId];
+
+          changed = true;
+          continue;
+        }
+
+        // Kanal boşsa sil
+        if (
+          channel.type ===
+            ChannelType.GuildVoice &&
+          channel.members.size === 0
+        ) {
+          await channel.delete(
+            "LynoxNetwork • Geçici ses kanalı boş kaldı"
+          ).catch(() => {});
+
+          delete guildData.voice
+            .tempChannels[channelId];
+
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        saveData();
+      }
+    }
+  } catch (err) {
+    console.error(
+      "Geçici ses temizleme hatası:",
+      err
+    );
+  }
+}, 30 * 1000);
+
+
+// =========================
+// BOT HAZIR
+// =========================
+
+client.once("ready", async () => {
+  console.log(
+    `✅ ${client.user.tag} aktif!`
+  );
+
+  console.log(
+    `🌐 ${client.guilds.cache.size} sunucu`
+  );
+
+  client.user.setPresence({
+    activities: [
+      {
+        name:
+          "LynoxNetwork • !panel",
+        type:
+          ActivityType.Watching
+      }
+    ],
+    status: "online"
+  });
+
+  // =========================
+  // KAYITLI ÇEKİLİŞLERİ KONTROL ET
+  // =========================
+
+  for (
+    const guild of client.guilds.cache.values()
+  ) {
+    const guildData =
+      getGuildData(guild.id);
+
+    if (guildData.giveaways) {
+      for (
+        const [giveawayId, giveaway]
+        of Object.entries(
+          guildData.giveaways
+        )
+      ) {
+        const remaining =
+          giveaway.endAt -
+          Date.now();
+
+        if (remaining <= 0) {
+          finishGiveaway(
+            guild.id,
+            giveawayId
+          ).catch(err =>
+            console.error(
+              "Çekiliş bitirme hatası:",
+              err
+            )
+          );
+        } else {
+          setTimeout(
+            () =>
+              finishGiveaway(
+                guild.id,
+                giveawayId
+              ),
+            remaining
+          );
         }
       }
     }
 
-    const closeEmbed =
-      createEmbed(
-        "🔒 TICKET KAPATILDI",
-        [
-          `🎫 **Ticket:** ${ticket.category}`,
-          `👤 **Sahip:** <@${ticket.userId}>`,
-          `🔒 **Kapatan:** ${interaction.user}`,
-          "",
-          "Transcript ektedir."
-        ].join("\n")
-      );
+    // =========================
+    // AKTİF KLAN OYLAMASI
+    // =========================
 
-    for (
-      const recipient
-      of recipients
+    if (
+      guildData.clans?.active
     ) {
-      await recipient.send({
-        embeds: [closeEmbed],
-        files: [file]
-      }).catch(() => {});
+      const remaining =
+        guildData.clans.active.endAt -
+        Date.now();
+
+      if (remaining <= 0) {
+        finishClanVote(
+          guild.id
+        ).catch(err =>
+          console.error(
+            "Klan oylaması bitirme hatası:",
+            err
+          )
+        );
+      } else {
+        setTimeout(
+          () =>
+            finishClanVote(
+              guild.id
+            ),
+          remaining
+        );
+      }
     }
-
-    ticket.closed = true;
-    ticket.closedAt =
-      Date.now();
-    ticket.closedBy =
-      interaction.user.id;
-
-    save();
-
-    await interaction.editReply({
-      content:
-        "✅ Ticket kapatılıyor ve transcript gönderiliyor."
-    });
-
-    setTimeout(
-      () => {
-        channel.delete()
-          .catch(() => {});
-
-        delete data.tickets[
-          ticketId
-        ];
-
-        save();
-      },
-      2000
-    );
-
-    return;
   }
+});
+// 10/10
+
+// =========================
+// GÜVENLİ KAPANIŞ
+// =========================
+
+process.on("unhandledRejection", error => {
+  console.error(
+    "❌ Unhandled Promise Rejection:",
+    error
+  );
+});
+
+process.on("uncaughtException", error => {
+  console.error(
+    "❌ Uncaught Exception:",
+    error
+  );
+});
+
+process.on("SIGTERM", () => {
+  console.log(
+    "🛑 Railway SIGTERM aldı, bot kapatılıyor..."
+  );
+
+  try {
+    saveData();
+  } catch (err) {
+    console.error(
+      "Veri kaydetme hatası:",
+      err
+    );
+  }
+
+  client.destroy();
+
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
+});
+
+process.on("SIGINT", () => {
+  console.log(
+    "🛑 Bot kapatılıyor..."
+  );
+
+  try {
+    saveData();
+  } catch (err) {
+    console.error(
+      "Veri kaydetme hatası:",
+      err
+    );
+  }
+
+  client.destroy();
+
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
+});
+
+
+// =========================
+// BOTU BAŞLAT
+// =========================
+
+if (!process.env.DISCORD_TOKEN) {
+  console.error(
+    "❌ DISCORD_TOKEN bulunamadı!"
+  );
+
+  console.error(
+    "Railway → Variables bölümünden DISCORD_TOKEN ekle."
+  );
+
+  process.exit(1);
+}
+
+client.login(
+  process.env.DISCORD_TOKEN
+).catch(error => {
+  console.error(
+    "❌ Discord giriş hatası:",
+    error
+  );
+
+  process.exit(1);
 });
