@@ -2565,10 +2565,7 @@ client.on(
         // TICKET KANAL ADI
         // ----------------------------------------------
 
-        const safeUsername =
-          cleanChannelName(
-            interaction.user.username
-          );
+       const safeName = member.displayName;
 
         const channelName =
           `ticket-${safeUsername}`;
