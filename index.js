@@ -395,7 +395,6 @@ client.on("messageCreate", async message => {
 
   const guildData = getGuildData(message.guild.id);
 
-
   if (command === "avatar") {
     const target =
       message.mentions.users.first() || message.author;
@@ -452,7 +451,7 @@ client.on("messageCreate", async message => {
   }
 
   if (command === "serverinfo") {
-    const ownerId = message.guild.ownerId;
+    const owner = await message.guild.fetchOwner();
 
     const guildData = getGuildData(message.guild.id);
 
@@ -523,7 +522,7 @@ client.on("messageCreate", async message => {
       message.channel.id !== ratingChannelId
     ) {
       try {
-        message.delete().catch(() => {});
+        await message.delete();
       } catch {}
 
       const warning = await message.channel.send({
@@ -819,7 +818,6 @@ client.on("messageCreate", async message => {
     );
 
     return;
-        }
 
   if (command === "drop") {
     if (!isStaff(message.member)) {
@@ -1190,7 +1188,6 @@ client.on("messageCreate", async message => {
         )
       ]
     });
-  }
 
 function createClanVotingEmbed(voteData) {
   const sorted = [...voteData.clans].sort(
@@ -1550,7 +1547,7 @@ async function sendTicketTranscript(
       err
     );
   }
-}
+      }
 
 client.on("interactionCreate", async interaction => {
   try {
@@ -2504,7 +2501,6 @@ client.on("interactionCreate", async interaction => {
     );
   }
 });
-// 7/10
 
     // =========================
     // KANAL SEÇİMLERİ
