@@ -453,7 +453,7 @@ client.on("messageCreate", async message => {
   }
 
   if (command === "serverinfo") {
-    const owner = await message.guild.members.fetch(message.guild.ownerId);
+    const owner = message.guild.members.cache.get(message.guild.ownerId);
 
     const guildData = getGuildData(message.guild.id);
 
