@@ -395,7 +395,6 @@ client.on("messageCreate", async message => {
 
   const guildData = getGuildData(message.guild.id);
 
-});
 
   if (command === "avatar") {
     const target =
