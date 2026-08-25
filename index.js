@@ -382,7 +382,7 @@ client.on("guildMemberRemove", async member => {
   }
 });
 
-client.on("messageCreate", async message => {
+client.on("messageCreate" message => {
   if (message.author.bot) return;
   if (!message.guild) return;
 
