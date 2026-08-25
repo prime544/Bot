@@ -6472,7 +6472,7 @@ function cleanChannelName(
   return name
     .toLowerCase()
     .replace(
-      /[^a-z0-9ğüşöçıİĞÜŞÖÇ-_]/gi,
+      /[^a-z0-9ğüşöçıİĞÜŞÖÇ_-]/gi
       "-"
     )
     .replace(
