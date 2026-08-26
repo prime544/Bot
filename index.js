@@ -4141,10 +4141,7 @@ client.on(
           return;
         }
 
-        const safeName =
-          cleanChannelName(
-            member.displayName
-          );
+        const safeName = member.displayName;
 
         const roomName =
           `🔊 ${safeName}'ın Odası`;
@@ -5545,26 +5542,6 @@ function canManageRole(
     role.position <
     botMember.roles.highest.position
   );
-}
-
-// ======================================================
-// YARDIMCI: KANAL İSMİ
-// ======================================================
-
-function cleanChannelName(
-  name
-) {
-  return name
-    .toLowerCase()
-    .replace(
-      /[^a-z0-9ğüşöçıİĞÜŞÖÇ-_]/gi,
-      "-"
-    )
-    .replace(
-      /-+/g,
-      "-"
-    )
-    .slice(0, 80);
 }
 
 // ======================================================
