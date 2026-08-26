@@ -5433,328 +5433,286 @@ client.on(
 );
 
 // ======================================================
-// !IP - OTOMATİK MINECRAFT SUNUCU DURUMU
-// 10 SANİYEDE BİR GÜNCELLENİR
+// 🌐 LYNoxNETWORK !IP SİSTEMİ
 // ======================================================
 
-if (
-  message.content.toLowerCase().trim() === "!ip"
-) {
+const ipMessages = new Map();
+
+const MC_SERVER_IP = "play.lynoxnetwork.com.tr";
+const MC_SERVER_PORT = 25565;
+
+
+// ======================================================
+// 🌐 SUNUCU DURUMUNU KONTROL ET
+// ======================================================
+
+async function getMinecraftStatus() {
   try {
-    const https = require("https");
 
-    const host =
-      "play.lynoxnetwork.com.tr";
+    const result = await status(
+      MC_SERVER_IP,
+      MC_SERVER_PORT,
+      {
+        timeout: 5000
+      }
+    );
 
-    // --------------------------------------------------
-    // MINECRAFT DURUMUNU AL
-    // --------------------------------------------------
+    return {
+      online: true,
 
-    const getServerStatus =
-      () => {
-        return new Promise(
-          (resolve, reject) => {
+      playersOnline:
+        result.players?.online ?? 0,
 
-            const url =
-              `https://api.mcstatus.io/v2/status/java/${encodeURIComponent(host)}?query=false`;
+      playersMax:
+        result.players?.max ?? 0,
 
-            const request =
-              https.get(
-                url,
-                response => {
-
-                  let body = "";
-
-                  response.on(
-                    "data",
-                    chunk => {
-                      body += chunk;
-                    }
-                  );
-
-                  response.on(
-                    "end",
-                    () => {
-
-                      if (
-                        response.statusCode < 200 ||
-                        response.statusCode >= 300
-                      ) {
-                        return reject(
-                          new Error(
-                            `MCStatus HTTP ${response.statusCode}`
-                          )
-                        );
-                      }
-
-                      try {
-                        const data =
-                          JSON.parse(body);
-
-                        resolve(data);
-
-                      } catch (error) {
-                        reject(error);
-                      }
-                    }
-                  );
-                }
-              );
-
-            request.on(
-              "error",
-              error => {
-                reject(error);
-              }
-            );
-
-            request.setTimeout(
-              8000,
-              () => {
-                request.destroy();
-
-                reject(
-                  new Error(
-                    "Minecraft status sorgusu zaman aşımına uğradı."
-                  )
-                );
-              }
-            );
-          }
-        );
-      };
-
-    // --------------------------------------------------
-    // EMBED OLUŞTUR
-    // --------------------------------------------------
-
-    const createStatusEmbed =
-      async () => {
-
-        try {
-
-          const data =
-            await getServerStatus();
-
-          // ==========================================
-          // SUNUCU KAPALI
-          // ==========================================
-
-          if (!data.online) {
-
-            return new EmbedBuilder()
-              .setColor(0xef4444)
-              .setTitle(
-                "🔴 LynoxNetwork Sunucu Durumu"
-              )
-              .setDescription(
-                "Minecraft sunucusu şu anda **çevrimdışı**."
-              )
-              .addFields(
-                {
-                  name:
-                    "📡 Durum",
-                  value:
-                    "🔴 **Kapalı**",
-                  inline: true
-                },
-                {
-                  name:
-                    "🌐 Java IP",
-                  value:
-                    "`play.lynoxnetwork.com.tr`",
-                  inline: false
-                }
-              )
-              .setTimestamp()
-              .setFooter({
-                text:
-                  "LynoxNetwork • 10 saniyede bir güncellenir"
-              });
-          }
-
-          // ==========================================
-          // SUNUCU AÇIK
-          // ==========================================
-
-          const onlinePlayers =
-            data.players?.online ?? 0;
-
-          const maxPlayers =
-            data.players?.max ?? 0;
-
-          const version =
-            data.version?.name_clean ||
-            data.version?.name ||
-            "Bilinmiyor";
-
-          const motd =
-            data.motd?.clean ||
-            "MOTD bulunamadı.";
-
-          return new EmbedBuilder()
-            .setColor(0x22c55e)
-            .setTitle(
-              "🟢 LynoxNetwork Sunucu Durumu"
-            )
-            .setDescription(
-              "Minecraft sunucusu şu anda **çevrimiçi!** 🎉"
-            )
-            .addFields(
-              {
-                name:
-                  "📡 Durum",
-                value:
-                  "🟢 **Açık**",
-                inline: true
-              },
-              {
-                name:
-                  "👥 Oyuncular",
-                value:
-                  `**${onlinePlayers}/${maxPlayers}**`,
-                inline: true
-              },
-              {
-                name:
-                  "🧩 Sürüm",
-                value:
-                  `\`${version}\``,
-                inline: true
-              },
-              {
-                name:
-                  "🌐 Java IP",
-                value:
-                  "`play.lynoxnetwork.com.tr`",
-                inline: false
-              },
-              {
-                name:
-                  "📜 MOTD",
-                value:
-                  `\`${String(motd).slice(0, 1000)}\``,
-                inline: false
-              }
-            )
-            .setTimestamp()
-            .setFooter({
-              text:
-                "LynoxNetwork • 10 saniyede bir güncellenir"
-            });
-
-        } catch (error) {
-
-          console.error(
-            "Minecraft durum sorgusu hatası:",
-            error
-          );
-
-          return new EmbedBuilder()
-            .setColor(0xf59e0b)
-            .setTitle(
-              "🟠 LynoxNetwork Sunucu Durumu"
-            )
-            .setDescription(
-              "Minecraft sunucusunun durumu şu anda kontrol edilemiyor."
-            )
-            .addFields({
-              name:
-                "🌐 Java IP",
-              value:
-                "`play.lynoxnetwork.com.tr`"
-            })
-            .setTimestamp()
-            .setFooter({
-              text:
-                "LynoxNetwork • Durum kontrol ediliyor..."
-            });
-        }
-      };
-
-    // --------------------------------------------------
-    // İLK MESAJ
-    // --------------------------------------------------
-
-    const firstEmbed =
-      await createStatusEmbed();
-
-    const statusMessage =
-      await message.channel.send({
-        embeds: [
-          firstEmbed
-        ]
-      });
-
-    // --------------------------------------------------
-    // HER 10 SANİYEDE BİR GÜNCELLE
-    // --------------------------------------------------
-
-    const statusInterval =
-      setInterval(
-        async () => {
-
-          try {
-
-            const newEmbed =
-              await createStatusEmbed();
-
-            await statusMessage.edit({
-              embeds: [
-                newEmbed
-              ]
-            });
-
-          } catch (error) {
-
-            console.error(
-              "!ip otomatik güncelleme hatası:",
-              error
-            );
-
-            // Mesaj silindiyse intervali durdur
-            if (
-              error.code === 10008 ||
-              error.code === 10003
-            ) {
-              clearInterval(
-                statusInterval
-              );
-            }
-          }
-
-        },
-        10 * 1000
-      );
-
-    // --------------------------------------------------
-    // BOT KAPANIRKEN INTERVALİ TEMİZLE
-    // --------------------------------------------------
-
-    statusMessage
-      .client
-      .once(
-        "destroy",
-        () => {
-          clearInterval(
-            statusInterval
-          );
-        }
-      );
+      ping:
+        result.roundTripLatency ?? 0
+    };
 
   } catch (error) {
 
-    console.error(
-      "!ip sistemi hatası:",
-      error
-    );
-
-    await message.reply({
-      content:
-        "❌ Sunucu durum mesajı oluşturulamadı."
-    }).catch(() => {});
+    return {
+      online: false,
+      playersOnline: 0,
+      playersMax: 0,
+      ping: 0
+    };
   }
 }
+
+
+// ======================================================
+// 🌐 IP EMBED
+// ======================================================
+
+async function createIPEmbed() {
+
+  const server =
+    await getMinecraftStatus();
+
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        "🌐 LynoxNetwork Sunucu Durumu"
+      )
+      .setTimestamp()
+      .setFooter({
+        text:
+          "LynoxNetwork • Canlı Sunucu Sistemi"
+      });
+
+  // --------------------------------------------------
+  // SUNUCU AÇIK
+  // --------------------------------------------------
+
+  if (server.online) {
+
+    embed
+      .setColor(0x22c55e)
+      .setDescription(
+        "🟢 **Sunucu şu anda AÇIK!**"
+      )
+      .addFields(
+        {
+          name: "🎮 Sunucu IP",
+          value:
+            `\`${MC_SERVER_IP}\``,
+          inline: false
+        },
+        {
+          name: "👥 Oyuncular",
+          value:
+            `**${server.playersOnline} / ${server.playersMax}**`,
+          inline: true
+        },
+        {
+          name: "📡 Ping",
+          value:
+            `**${Math.round(server.ping)}ms**`,
+          inline: true
+        },
+        {
+          name: "🔄 Güncelleme",
+          value:
+            "**10 saniyede bir**",
+          inline: true
+        }
+      );
+
+  }
+
+  // --------------------------------------------------
+  // SUNUCU KAPALI
+  // --------------------------------------------------
+
+  else {
+
+    embed
+      .setColor(0xef4444)
+      .setDescription(
+        "🔴 **Sunucu şu anda KAPALI!**"
+      )
+      .addFields(
+        {
+          name: "🎮 Sunucu IP",
+          value:
+            `\`${MC_SERVER_IP}\``,
+          inline: false
+        },
+        {
+          name: "👥 Oyuncular",
+          value:
+            "**-**",
+          inline: true
+        },
+        {
+          name: "📡 Ping",
+          value:
+            "**-**",
+          inline: true
+        },
+        {
+          name: "🔄 Güncelleme",
+          value:
+            "**10 saniyede bir**",
+          inline: true
+        }
+      );
+  }
+
+  return embed;
+}
+
+
+// ======================================================
+// !IP KOMUTU
+// ======================================================
+
+client.on(
+  "messageCreate",
+  async message => {
+
+    try {
+
+      if (
+        message.author.bot ||
+        !message.guild
+      ) {
+        return;
+      }
+
+      if (
+        message.content
+          .trim()
+          .toLowerCase() !== "!ip"
+      ) {
+        return;
+      }
+
+      // ------------------------------------------------
+      // ESKİ MESAJI SİL
+      // ------------------------------------------------
+
+      const oldMessage =
+        ipMessages.get(
+          message.channel.id
+        );
+
+      if (oldMessage) {
+
+        await oldMessage
+          .delete()
+          .catch(() => {});
+
+      }
+
+      // ------------------------------------------------
+      // KOMUTU SİL
+      // ------------------------------------------------
+
+      await message
+        .delete()
+        .catch(() => {});
+
+      // ------------------------------------------------
+      // DURUMU KONTROL ET
+      // ------------------------------------------------
+
+      const embed =
+        await createIPEmbed();
+
+      // ------------------------------------------------
+      // MESAJI GÖNDER
+      // ------------------------------------------------
+
+      const ipMessage =
+        await message.channel.send({
+          embeds: [
+            embed
+          ]
+        });
+
+      ipMessages.set(
+        message.channel.id,
+        ipMessage
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ !ip komut hatası:",
+        error
+      );
+
+    }
+
+  }
+);
+
+
+// ======================================================
+// 🔄 HER 10 SANİYEDE GÜNCELLE
+// ======================================================
+
+setInterval(
+  async () => {
+
+    for (
+      const [
+        channelId,
+        ipMessage
+      ] of ipMessages
+    ) {
+
+      try {
+
+        const embed =
+          await createIPEmbed();
+
+        await ipMessage.edit({
+          embeds: [
+            embed
+          ]
+        });
+
+      } catch (error) {
+
+        console.error(
+          `❌ IP mesajı güncellenemedi (${channelId}):`,
+          error.message
+        );
+
+        ipMessages.delete(
+          channelId
+        );
+      }
+
+    }
+
+  },
+  10 * 1000
+);
 
 // ======================================================
 // !PANEL KOMUTU
