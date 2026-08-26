@@ -20,6 +20,7 @@ const {
 
 const fs = require("fs");
 const path = require("path");
+const { status } = require("minecraft-server-util");
 
 const client = new Client({
   intents: [
