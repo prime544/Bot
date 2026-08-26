@@ -5316,6 +5316,122 @@ client.on(
 );
 
 // ======================================================
+// !ÖNERİ KOMUTU
+// ======================================================
+
+client.on(
+  "messageCreate",
+  async message => {
+    try {
+      if (
+        message.author.bot ||
+        !message.guild
+      ) {
+        return;
+      }
+
+      const content =
+        message.content.trim();
+
+      if (
+        !content
+          .toLowerCase()
+          .startsWith("!öneri")
+      ) {
+        return;
+      }
+
+      const config =
+        getGuildConfig(
+          message.guild.id
+        );
+
+      const suggestionChannelId =
+        config.suggestion?.channelId;
+
+      if (!suggestionChannelId) {
+        return message.reply({
+          content:
+            "❌ Öneri sistemi henüz kurulmamış. `!panel` üzerinden **Öneri Kanalı** sistemini kur."
+        });
+      }
+
+      if (
+        message.channel.id !==
+        suggestionChannelId
+      ) {
+        return message.reply({
+          content:
+            `❌ Öneri vermek için <#${suggestionChannelId}> kanalını kullanmalısın.`
+        });
+      }
+
+      const suggestion =
+        content
+          .slice("!öneri".length)
+          .trim();
+
+      if (!suggestion) {
+        return message.reply({
+          content:
+            "❌ Bir öneri yazmalısın.\n\nÖrnek:\n`!öneri Sunucuya yeni bir etkinlik gelsin.`"
+        });
+      }
+
+      await message.delete()
+        .catch(() => {});
+
+      const embed =
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("💡 Yeni Sunucu Önerisi")
+          .setDescription(
+            `> ${suggestion}`
+          )
+          .addFields(
+            {
+              name: "👤 Öneren",
+              value:
+                `${message.author}\n\`${message.author.tag}\``,
+              inline: true
+            },
+            {
+              name: "📊 Durum",
+              value:
+                "🟡 Değerlendiriliyor",
+              inline: true
+            }
+          )
+          .setThumbnail(
+            message.author.displayAvatarURL({
+              dynamic: true,
+              size: 512
+            })
+          )
+          .setTimestamp()
+          .setFooter({
+            text:
+              `${message.guild.name} • Öneri Sistemi`
+          });
+
+      const suggestionMessage =
+        await message.channel.send({
+          embeds: [embed]
+        });
+
+      await suggestionMessage.react("👍");
+      await suggestionMessage.react("👎");
+
+    } catch (error) {
+      console.error(
+        "❌ Öneri sistemi hatası:",
+        error
+      );
+    }
+  }
+);
+
+// ======================================================
 // !PANEL KOMUTU
 // ======================================================
 
