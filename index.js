@@ -1336,6 +1336,235 @@ client.on("interactionCreate", async interaction => {
       }
     }
 
+// ======================================================
+// GİRİŞ-ÇIKIŞ KATEGORİ SEÇİMİ
+// ======================================================
+
+if (
+  interaction.isChannelSelectMenu() &&
+  interaction.customId === "welcome_setup_category"
+) {
+  try {
+    const categoryId = interaction.values[0];
+
+    const category =
+      interaction.guild.channels.cache.get(categoryId);
+
+    if (!category) {
+      return interaction.reply({
+        content: "❌ Kategori bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    const existing =
+      interaction.guild.channels.cache.find(
+        channel =>
+          channel.name === "🤩│giriş-çıkış" &&
+          channel.parentId === category.id
+      );
+
+    if (existing) {
+      return interaction.reply({
+        content:
+          `⚠️ Giriş-çıkış kanalı zaten mevcut: ${existing}`,
+        ephemeral: true
+      });
+    }
+
+    const channel =
+      await interaction.guild.channels.create({
+        name: "🤩│giriş-çıkış",
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.roles.everyone.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel
+            ],
+            deny: [
+              PermissionsBitField.Flags.SendMessages
+            ]
+          },
+          {
+            id: interaction.client.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.EmbedLinks
+            ]
+          }
+        ]
+      });
+
+    const config =
+      getGuildConfig(interaction.guild.id);
+
+    config.welcome = {
+      enabled: true,
+      channelId: channel.id
+    };
+
+    saveGuildConfig(
+      interaction.guild.id,
+      config
+    );
+
+    return interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setTitle("🤩 Giriş-Çıkış Sistemi Hazır")
+          .setDescription(
+            `Giriş ve çıkış mesajlarının gönderileceği kanal oluşturuldu:\n\n` +
+            `${channel}\n\n` +
+            "✅ Yeni üyeler giriş yaptığında\n" +
+            "👋 Üyeler ayrıldığında\n" +
+            "mesajlar bu kanala gönderilecek."
+          )
+          .setTimestamp()
+          .setFooter({
+            text: "Giriş-Çıkış Sistemi"
+          })
+      ],
+      components: []
+    });
+
+  } catch (error) {
+    console.error(
+      "Giriş-çıkış kurulum hatası:",
+      error
+    );
+
+    if (
+      !interaction.replied &&
+      !interaction.deferred
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Giriş-çıkış sistemi kurulurken bir hata oluştu.",
+        ephemeral: true
+      });
+    }
+  }
+}
+
+
+// ======================================================
+// PUAN KATEGORİ SEÇİMİ
+// ======================================================
+
+if (
+  interaction.isChannelSelectMenu() &&
+  interaction.customId === "rating_setup_category"
+) {
+  try {
+    const categoryId = interaction.values[0];
+
+    const category =
+      interaction.guild.channels.cache.get(categoryId);
+
+    if (!category) {
+      return interaction.reply({
+        content: "❌ Kategori bulunamadı.",
+        ephemeral: true
+      });
+    }
+
+    const existing =
+      interaction.guild.channels.cache.find(
+        channel =>
+          channel.name === "⭐│puan" &&
+          channel.parentId === category.id
+      );
+
+    if (existing) {
+      return interaction.reply({
+        content:
+          `⚠️ Puan kanalı zaten mevcut: ${existing}`,
+        ephemeral: true
+      });
+    }
+
+    const channel =
+      await interaction.guild.channels.create({
+        name: "⭐│puan",
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.roles.everyone.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages
+            ]
+          },
+          {
+            id: interaction.client.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.EmbedLinks,
+              PermissionsBitField.Flags.ManageMessages
+            ]
+          }
+        ]
+      });
+
+    const config =
+      getGuildConfig(interaction.guild.id);
+
+    config.rating = {
+      enabled: true,
+      channelId: channel.id,
+      total: 0,
+      count: 0,
+      users: {}
+    };
+
+    saveGuildConfig(
+      interaction.guild.id,
+      config
+    );
+
+    return interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xfacc15)
+          .setTitle("⭐ Puan Sistemi Hazır")
+          .setDescription(
+            `Puan verme kanalı oluşturuldu:\n\n` +
+            `${channel}\n\n` +
+            "⭐ Üyeler bu kanalda `!puanver 1-5` komutuyla sunucuya puan verebilir."
+          )
+          .setTimestamp()
+          .setFooter({
+            text: "Puan Sistemi"
+          })
+      ],
+      components: []
+    });
+
+  } catch (error) {
+    console.error(
+      "Puan kanalı kurulum hatası:",
+      error
+    );
+
+    if (
+      !interaction.replied &&
+      !interaction.deferred
+    ) {
+      return interaction.reply({
+        content:
+          "❌ Puan sistemi kurulurken bir hata oluştu.",
+        ephemeral: true
+      });
+    }
+  }
+}
+    
     // ==================================================
     // TICKET KATEGORİ SEÇİMİ
     // ==================================================
